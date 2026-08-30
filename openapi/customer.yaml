@@ -7,7 +7,7 @@ info:
     This API is safe for a customer-facing browser when the consuming
     application's backend supplies a short-lived, tenant-bound end-user token.
     It never accepts Daykeeper administrative credentials and never exposes
-    Chatwoot credentials or provider response bodies.
+    infrastructure-provider credentials or response bodies.
   contact:
     name: SkyPorch
     url: https://github.com/SkyPorch/daykeeper-openapi
@@ -304,7 +304,7 @@ components:
         unreadCount:
           type: integer
           minimum: 0
-          description: Chatwoot agent-side unread count; do not use for a customer badge.
+          description: Agent-side unread count reported by the conversation provider; do not use for a customer badge.
         unreadForContact:
           type: integer
           minimum: 0
