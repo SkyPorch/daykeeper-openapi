@@ -1,0 +1,1467 @@
+openapi: 3.1.0
+info:
+  title: Daykeeper Management API
+  version: 0.1.0
+  summary: Safe, multi-tenant support administration for people and agents.
+  description: |
+    Daykeeper owns tenant lifecycle, support-channel provisioning, durable
+    operations, and versioned flows. Mutations that create external resources
+    use plan/apply and idempotency. Provider and Chatwoot credentials and
+    identifiers are never part of this contract.
+  contact:
+    name: SkyPorch
+    url: https://github.com/SkyPorch/daykeeper-openapi
+  license:
+    name: All rights reserved; public license selection pending
+    identifier: LicenseRef-SkyPorch-Proprietary
+servers:
+  - url: https://api.daykeeper.example
+    description: Placeholder origin; SDK consumers configure their deployed Daykeeper origin.
+tags:
+  - name: Capabilities
+    description: Runtime feature and schema discovery.
+  - name: Tenants
+    description: Tenant planning, provisioning, and observed state.
+  - name: Customer sessions
+    description: Short-lived customer and service tokens for a tenant gateway.
+  - name: Email channels
+    description: Email-domain planning, DNS evidence, and round-trip readiness.
+  - name: Operations
+    description: Durable, inspectable provisioning work.
+  - name: Flows
+    description: Versioned, immutable support-flow management.
+security:
+  - daykeeperOAuth:
+      - daykeeper.accounts:read
+paths:
+  /v1/capabilities:
+    get:
+      operationId: getCapabilities
+      summary: Inspect enabled API capabilities
+      tags: [Capabilities]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.accounts:read
+      responses:
+        "200":
+          description: Enabled capabilities.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapabilitiesResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/tenant-plans:
+    post:
+      operationId: planTenant
+      summary: Plan creation of a tenant
+      tags: [Tenants]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.accounts:write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantSpec"
+      responses:
+        "201":
+          description: A short-lived, inspectable tenant creation plan.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantPlanResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  "/v1/tenants:apply":
+    post:
+      operationId: applyTenantPlan
+      summary: Apply a tenant creation plan
+      description: Returns the original result when the same idempotency key is replayed.
+      tags: [Tenants]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.provisioning:apply
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApplyPlanInput"
+      responses:
+        "200":
+          description: An idempotent replay of the original apply result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplyTenantResponse"
+        "202":
+          description: Provisioning was accepted as a durable operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplyTenantResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/tenants:
+    get:
+      operationId: listTenants
+      summary: List tenants visible to the caller
+      tags: [Tenants]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.accounts:read
+      responses:
+        "200":
+          description: Tenant list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantListResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  "/v1/tenants/{tenantId}":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      operationId: getTenant
+      summary: Get a tenant
+      tags: [Tenants]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.accounts:read
+      responses:
+        "200":
+          description: Tenant state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  "/v1/tenants/{tenantId}/customer-sessions":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    post:
+      operationId: createCustomerSession
+      summary: Create a short-lived tenant gateway token
+      description: |
+        Exchanges the caller's tenant-bound service identity for a token that
+        can be used only at the customer gateway. Customer context selects
+        support presentation and never grants product entitlement. Lifecycle
+        and erasure purposes require their own OAuth scopes.
+      tags: [Customer sessions]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.customer-sessions:write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCustomerSessionInput"
+      responses:
+        "201":
+          description: A short-lived, audience-bound gateway token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerSessionResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  "/v1/tenants/{tenantId}/email-channel-plans":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    post:
+      operationId: planEmailChannel
+      summary: Plan an email channel
+      tags: [Email channels]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.accounts:write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailChannelSpec"
+      responses:
+        "201":
+          description: A short-lived email-channel plan and required DNS records.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailChannelPlanResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  "/v1/email-channels:apply":
+    post:
+      operationId: applyEmailChannelPlan
+      summary: Apply an email-channel plan
+      tags: [Email channels]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.provisioning:apply
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApplyPlanInput"
+      responses:
+        "200":
+          description: An idempotent replay of the original apply result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplyEmailChannelResponse"
+        "202":
+          description: Channel provisioning was accepted as a durable operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplyEmailChannelResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  "/v1/tenants/{tenantId}/email-channel":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      operationId: getEmailChannel
+      summary: Get a tenant email channel
+      tags: [Email channels]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.provisioning:read
+      responses:
+        "200":
+          description: Email-channel state and readiness evidence.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailChannelResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  "/v1/operations/{operationId}":
+    parameters:
+      - $ref: "#/components/parameters/OperationId"
+    get:
+      operationId: getOperation
+      summary: Get a durable operation
+      tags: [Operations]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.provisioning:read
+      responses:
+        "200":
+          description: Current operation state and bounded step details.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  "/v1/operations/{operationId}/retry":
+    parameters:
+      - $ref: "#/components/parameters/OperationId"
+    post:
+      operationId: retryOperation
+      summary: Retry a failed, retryable operation
+      tags: [Operations]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.provisioning:apply
+      responses:
+        "202":
+          description: The operation was queued for another bounded attempt.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  "/v1/tenants/{tenantId}/flows":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      operationId: listTenantFlows
+      summary: List a tenant's flows
+      tags: [Flows]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.flows:read
+      responses:
+        "200":
+          description: Flow list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowListResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createFlow
+      summary: Create a flow and its first immutable version
+      tags: [Flows]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.flows:write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFlowInput"
+      responses:
+        "201":
+          description: Draft flow and immutable version one.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowWithVersionResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/flows:
+    get:
+      operationId: listFlows
+      summary: List flows visible to the caller
+      tags: [Flows]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.flows:read
+      parameters:
+        - name: tenantId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Flow list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowListResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  "/v1/flows/{flowId}":
+    parameters:
+      - $ref: "#/components/parameters/FlowId"
+    get:
+      operationId: getFlow
+      summary: Get a flow and its latest version
+      tags: [Flows]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.flows:read
+      responses:
+        "200":
+          description: Flow and latest immutable definition.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowWithVersionResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  "/v1/flows/{flowId}/versions":
+    parameters:
+      - $ref: "#/components/parameters/FlowId"
+    post:
+      operationId: createFlowVersion
+      summary: Create the next immutable flow version
+      tags: [Flows]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.flows:write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFlowVersionInput"
+      responses:
+        "201":
+          description: Flow and newly created version.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowWithVersionResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  "/v1/flows/{flowId}/versions/{version}":
+    parameters:
+      - $ref: "#/components/parameters/FlowId"
+      - $ref: "#/components/parameters/FlowVersionNumber"
+    get:
+      operationId: getFlowVersion
+      summary: Get an immutable flow version
+      tags: [Flows]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.flows:read
+      responses:
+        "200":
+          description: Immutable flow version.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowVersionResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  "/v1/flows/{flowId}/versions/{version}/publish":
+    parameters:
+      - $ref: "#/components/parameters/FlowId"
+      - $ref: "#/components/parameters/FlowVersionNumber"
+    post:
+      operationId: publishFlowVersion
+      summary: Publish an immutable flow version
+      description: |
+        Publishing records audited desired state. The current capability reports
+        flow execution as management_only; this operation does not yet execute a
+        flow against customer conversations.
+      tags: [Flows]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.flows:publish
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublishFlowVersionInput"
+      responses:
+        "200":
+          description: Flow with the selected published version.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowWithVersionResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+components:
+  securitySchemes:
+    daykeeperOAuth:
+      type: oauth2
+      description: Short-lived, audience-bound Daykeeper OAuth access token.
+      flows:
+        clientCredentials:
+          tokenUrl: https://api.daykeeper.example/oauth/token
+          scopes:
+            daykeeper.accounts:read: Read organizations and tenants.
+            daykeeper.accounts:write: Plan organization and tenant changes.
+            daykeeper.flows:read: Read flow metadata and versions.
+            daykeeper.flows:write: Create flows and immutable versions.
+            daykeeper.flows:publish: Publish reviewed flow versions.
+            daykeeper.provisioning:read: Read operations and channel readiness.
+            daykeeper.provisioning:apply: Apply and retry provisioning plans.
+            daykeeper.customer-sessions:write: Mint tenant-bound customer session tokens.
+            daykeeper.lifecycle:write: Mint tokens for tenant lifecycle messages.
+            daykeeper.customers:delete: Mint target-bound customer erasure tokens.
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: A caller-generated key reused only for an exact logical mutation.
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 128
+        pattern: "^[A-Za-z0-9._:-]+$"
+    TenantId:
+      name: tenantId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    OperationId:
+      name: operationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    FlowId:
+      name: flowId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    FlowVersionNumber:
+      name: version
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+  responses:
+    Error:
+      description: Structured Daykeeper error. Resource denials do not disclose cross-tenant existence.
+      headers:
+        X-Request-Id:
+          description: Correlation identifier shared with support and audit logs.
+          schema:
+            type: string
+        Retry-After:
+          description: Seconds to wait when the response is retryable and rate limited.
+          schema:
+            type: integer
+            minimum: 0
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  schemas:
+    Capabilities:
+      type: object
+      additionalProperties: false
+      required: [apiVersion, emailChannels, customerSessions, flows]
+      properties:
+        apiVersion:
+          type: string
+          const: v1
+        emailChannels:
+          type: object
+          additionalProperties: false
+          required: [enabled]
+          properties:
+            enabled:
+              type: boolean
+        customerSessions:
+          type: object
+          additionalProperties: false
+          required: [enabled]
+          properties:
+            enabled:
+              type: boolean
+        flows:
+          type: object
+          additionalProperties: false
+          required: [schemaVersion, execution]
+          properties:
+            schemaVersion:
+              type: string
+              const: 2026-08-01
+            execution:
+              type: string
+              const: management_only
+    TenantSpec:
+      type: object
+      additionalProperties: false
+      required: [name, slug, locale, administrator]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 120
+        slug:
+          type: string
+          minLength: 1
+          maxLength: 63
+          pattern: "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+        locale:
+          type: string
+          minLength: 2
+          maxLength: 35
+        region:
+          type: string
+          minLength: 2
+          maxLength: 35
+        supportEmail:
+          type: string
+          format: email
+          maxLength: 254
+        administrator:
+          type: object
+          additionalProperties: false
+          required: [name, email]
+          properties:
+            name:
+              type: string
+              minLength: 2
+              maxLength: 120
+            email:
+              type: string
+              format: email
+              maxLength: 254
+    Tenant:
+      type: object
+      additionalProperties: false
+      required: [id, organizationId, spec, state, version, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        spec:
+          $ref: "#/components/schemas/TenantSpec"
+        state:
+          type: string
+          enum:
+            [
+              planned,
+              provisioning,
+              awaiting_channel,
+              ready,
+              degraded,
+              suspended,
+              deleting,
+            ]
+        version:
+          type: integer
+          minimum: 1
+        cellId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    CreateCustomerSessionInput:
+      type: object
+      additionalProperties: false
+      required: [purpose, subject]
+      properties:
+        purpose:
+          type: string
+          enum: [customer, lifecycle, erasure]
+        subject:
+          type: string
+          minLength: 1
+          maxLength: 255
+        email:
+          type: [string, "null"]
+          format: email
+          maxLength: 254
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        locale:
+          type: string
+          minLength: 2
+          maxLength: 35
+          description: Required by customer and lifecycle sessions. Omit for erasure sessions so no customer context crosses the erasure boundary.
+        country:
+          type: [string, "null"]
+          maxLength: 100
+          description: Optional ISO 3166-1 alpha-2 country. Invalid values are ignored rather than asserted onto the customer profile.
+        isPaid:
+          type: boolean
+          description: Presentation context only; never an entitlement grant. Omit when unknown so an existing customer profile is not overwritten.
+        paymentProvider:
+          type: string
+          enum: [stripe, apple_iap, android_iap, none]
+          description: Omit when unknown. The explicit none value means the caller knows the customer has no payment provider.
+        erasureTargetHash:
+          type: string
+          minLength: 43
+          maxLength: 43
+          pattern: "^[A-Za-z0-9_-]{43}$"
+          description: Required only for the erasure purpose.
+    CustomerSession:
+      type: object
+      additionalProperties: false
+      required: [token, tokenType, purpose, expiresAt]
+      properties:
+        token:
+          type: string
+          minLength: 64
+          description: Sensitive short-lived bearer token; never log or persist it.
+        tokenType:
+          type: string
+          const: Bearer
+        purpose:
+          type: string
+          enum: [customer, lifecycle, erasure]
+        expiresAt:
+          type: string
+          format: date-time
+    PlanChange:
+      type: object
+      additionalProperties: false
+      required: [action, resourceType, summary, irreversible]
+      properties:
+        action:
+          type: string
+          enum: [create, update, delete]
+        resourceType:
+          type: string
+        resourceId:
+          type: string
+        summary:
+          type: string
+        irreversible:
+          type: boolean
+    TenantPlan:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          organizationId,
+          kind,
+          spec,
+          changes,
+          requiredScopes,
+          warnings,
+          version,
+          createdAt,
+          expiresAt,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          const: tenant.create
+        spec:
+          $ref: "#/components/schemas/TenantSpec"
+        changes:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlanChange"
+        requiredScopes:
+          type: array
+          items:
+            $ref: "#/components/schemas/DaykeeperScope"
+        warnings:
+          type: array
+          items:
+            type: string
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        consumedAt:
+          type: string
+          format: date-time
+    ApplyPlanInput:
+      type: object
+      additionalProperties: false
+      required: [planId, planVersion]
+      properties:
+        planId:
+          type: string
+          format: uuid
+        planVersion:
+          type: integer
+          minimum: 1
+    EmailChannelSpec:
+      type: object
+      additionalProperties: false
+      required: [address]
+      properties:
+        address:
+          type: string
+          format: email
+          maxLength: 254
+        region:
+          type: string
+          enum: [us-east-1, eu-west-1, sa-east-1, ap-northeast-1]
+    DnsRecord:
+      type: object
+      additionalProperties: false
+      required: [record, name, type, value, status]
+      properties:
+        record:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [MX, TXT, CNAME]
+        value:
+          type: string
+        status:
+          type: string
+          enum: [not_started, pending, verified, failed]
+        priority:
+          type: integer
+        ttl:
+          type: string
+    EmailChannelVerification:
+      type: object
+      additionalProperties: false
+      required: [sending, receiving, inboundRoundTrip, outboundRoundTrip]
+      properties:
+        sending:
+          type: boolean
+        receiving:
+          type: boolean
+        inboundRoundTrip:
+          type: boolean
+        outboundRoundTrip:
+          type: boolean
+        lastCheckedAt:
+          type: string
+          format: date-time
+    EmailChannel:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          organizationId,
+          tenantId,
+          spec,
+          domain,
+          provider,
+          state,
+          dnsRecords,
+          verification,
+          version,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        spec:
+          $ref: "#/components/schemas/EmailChannelSpec"
+        domain:
+          type: string
+        provider:
+          type: string
+          const: resend
+        state:
+          type: string
+          enum:
+            [
+              provisioning,
+              pending_dns,
+              verifying,
+              pending_round_trip,
+              ready,
+              degraded,
+            ]
+        dnsRecords:
+          type: array
+          items:
+            $ref: "#/components/schemas/DnsRecord"
+        verification:
+          $ref: "#/components/schemas/EmailChannelVerification"
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    EmailChannelPlan:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          organizationId,
+          tenantId,
+          kind,
+          spec,
+          changes,
+          requiredScopes,
+          warnings,
+          version,
+          createdAt,
+          expiresAt,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          const: channel.email.configure
+        spec:
+          $ref: "#/components/schemas/EmailChannelSpec"
+        changes:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlanChange"
+        requiredScopes:
+          type: array
+          items:
+            $ref: "#/components/schemas/DaykeeperScope"
+        warnings:
+          type: array
+          items:
+            type: string
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        consumedAt:
+          type: string
+          format: date-time
+    OperationError:
+      type: object
+      additionalProperties: false
+      required: [code, message, retryable, nextActions]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        retryable:
+          type: boolean
+        nextActions:
+          type: array
+          items:
+            type: string
+    OperationStep:
+      type: object
+      additionalProperties: false
+      required: [name, state, attempts]
+      properties:
+        name:
+          type: string
+        state:
+          type: string
+          enum: [pending, running, succeeded, failed]
+        attempts:
+          type: integer
+          minimum: 0
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        error:
+          $ref: "#/components/schemas/OperationError"
+    Operation:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          organizationId,
+          tenantId,
+          kind,
+          state,
+          correlationId,
+          steps,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [tenant.provision, channel.email.configure]
+        state:
+          type: string
+          enum: [queued, running, succeeded, failed, cancelled]
+        correlationId:
+          type: string
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/OperationStep"
+        error:
+          $ref: "#/components/schemas/OperationError"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ApplyTenantResult:
+      type: object
+      additionalProperties: false
+      required: [tenant, operation, replayed]
+      properties:
+        tenant:
+          $ref: "#/components/schemas/Tenant"
+        operation:
+          $ref: "#/components/schemas/Operation"
+        replayed:
+          type: boolean
+    ApplyEmailChannelResult:
+      type: object
+      additionalProperties: false
+      required: [channel, operation, replayed]
+      properties:
+        channel:
+          $ref: "#/components/schemas/EmailChannel"
+        operation:
+          $ref: "#/components/schemas/Operation"
+        replayed:
+          type: boolean
+    FlowCondition:
+      type: object
+      additionalProperties: false
+      required: [field, operator, value]
+      properties:
+        field:
+          type: string
+          enum: [contact.email_domain, conversation.tag, message.text]
+        operator:
+          type: string
+          enum: [equals, contains, ends_with]
+        value:
+          type: string
+          minLength: 1
+          maxLength: 500
+    FlowAction:
+      oneOf:
+        - $ref: "#/components/schemas/ReplyAction"
+        - $ref: "#/components/schemas/TagAction"
+        - $ref: "#/components/schemas/HandoffAction"
+        - $ref: "#/components/schemas/PriorityAction"
+    ReplyAction:
+      type: object
+      additionalProperties: false
+      required: [id, type, text]
+      properties:
+        id:
+          $ref: "#/components/schemas/FlowActionId"
+        type:
+          type: string
+          const: reply
+        text:
+          type: string
+          minLength: 1
+          maxLength: 4000
+    TagAction:
+      type: object
+      additionalProperties: false
+      required: [id, type, tag]
+      properties:
+        id:
+          $ref: "#/components/schemas/FlowActionId"
+        type:
+          type: string
+          const: tag
+        tag:
+          type: string
+          minLength: 1
+          maxLength: 64
+    HandoffAction:
+      type: object
+      additionalProperties: false
+      required: [id, type, target]
+      properties:
+        id:
+          $ref: "#/components/schemas/FlowActionId"
+        type:
+          type: string
+          const: handoff
+        target:
+          type: string
+          enum: [agent, human, hybrid]
+    PriorityAction:
+      type: object
+      additionalProperties: false
+      required: [id, type, priority]
+      properties:
+        id:
+          $ref: "#/components/schemas/FlowActionId"
+        type:
+          type: string
+          const: set_priority
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+    FlowActionId:
+      type: string
+      minLength: 1
+      maxLength: 64
+    FlowDefinition:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, trigger, conditions, actions]
+      properties:
+        schemaVersion:
+          type: string
+          const: 2026-08-01
+        trigger:
+          type: object
+          additionalProperties: false
+          required: [event, channel]
+          properties:
+            event:
+              type: string
+              enum: [conversation.created, message.received]
+            channel:
+              type: string
+              const: email
+        conditions:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/FlowCondition"
+        actions:
+          type: array
+          minItems: 1
+          maxItems: 25
+          items:
+            $ref: "#/components/schemas/FlowAction"
+    Flow:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          organizationId,
+          tenantId,
+          slug,
+          name,
+          state,
+          latestVersion,
+          resourceVersion,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        state:
+          type: string
+          enum: [draft, published, archived]
+        latestVersion:
+          type: integer
+          minimum: 1
+        publishedVersion:
+          type: integer
+          minimum: 1
+        resourceVersion:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    FlowVersion:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          flowId,
+          organizationId,
+          tenantId,
+          version,
+          definition,
+          contentHash,
+          createdBy,
+          createdAt,
+        ]
+      properties:
+        flowId:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        version:
+          type: integer
+          minimum: 1
+        definition:
+          $ref: "#/components/schemas/FlowDefinition"
+        contentHash:
+          type: string
+        createdBy:
+          type: object
+          additionalProperties: false
+          required: [actorId, actorType]
+          properties:
+            actorId:
+              type: string
+            actorType:
+              type: string
+              enum: [human, agent, service]
+        createdAt:
+          type: string
+          format: date-time
+    FlowWithVersion:
+      type: object
+      additionalProperties: false
+      required: [flow, version]
+      properties:
+        flow:
+          $ref: "#/components/schemas/Flow"
+        version:
+          $ref: "#/components/schemas/FlowVersion"
+    CreateFlowInput:
+      type: object
+      additionalProperties: false
+      required: [name, slug, definition]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 120
+        slug:
+          type: string
+          minLength: 1
+          maxLength: 63
+          pattern: "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+        description:
+          type: string
+          minLength: 1
+          maxLength: 500
+        definition:
+          $ref: "#/components/schemas/FlowDefinition"
+    CreateFlowVersionInput:
+      type: object
+      additionalProperties: false
+      required: [expectedLatestVersion, definition]
+      properties:
+        expectedLatestVersion:
+          type: integer
+          minimum: 1
+        definition:
+          $ref: "#/components/schemas/FlowDefinition"
+    PublishFlowVersionInput:
+      type: object
+      additionalProperties: false
+      required: [expectedResourceVersion]
+      properties:
+        expectedResourceVersion:
+          type: integer
+          minimum: 1
+    DaykeeperScope:
+      type: string
+      enum:
+        - daykeeper.accounts:read
+        - daykeeper.accounts:write
+        - daykeeper.flows:read
+        - daykeeper.flows:write
+        - daykeeper.flows:publish
+        - daykeeper.provisioning:read
+        - daykeeper.provisioning:apply
+        - daykeeper.customer-sessions:write
+        - daykeeper.lifecycle:write
+        - daykeeper.customers:delete
+    ErrorDetail:
+      type: object
+      additionalProperties: false
+      required: [code, message, retryable, nextActions, correlationId]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        retryable:
+          type: boolean
+        nextActions:
+          type: array
+          items:
+            type: string
+        correlationId:
+          type: string
+        fields:
+          type: array
+          items:
+            type: string
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+    CapabilitiesResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/Capabilities"
+    TenantPlanResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/TenantPlan"
+    ApplyTenantResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ApplyTenantResult"
+    TenantListResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Tenant"
+    TenantResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/Tenant"
+    CustomerSessionResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/CustomerSession"
+    EmailChannelPlanResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/EmailChannelPlan"
+    ApplyEmailChannelResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ApplyEmailChannelResult"
+    EmailChannelResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/EmailChannel"
+    OperationResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/Operation"
+    FlowListResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Flow"
+    FlowWithVersionResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/FlowWithVersion"
+    FlowVersionResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/FlowVersion"
+    SuccessEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data: {}

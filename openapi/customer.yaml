@@ -1,0 +1,601 @@
+openapi: 3.1.0
+info:
+  title: Daykeeper Customer API
+  version: 0.1.0
+  summary: Customer conversation access through a tenant-safe Daykeeper gateway.
+  description: |
+    This API is safe for a customer-facing browser when the consuming
+    application's backend supplies a short-lived, tenant-bound end-user token.
+    It never accepts Daykeeper administrative credentials and never exposes
+    Chatwoot credentials or provider response bodies.
+  contact:
+    name: SkyPorch
+    url: https://github.com/SkyPorch/daykeeper-openapi
+  license:
+    name: All rights reserved; public license selection pending
+    identifier: LicenseRef-SkyPorch-Proprietary
+servers:
+  - url: https://support.daykeeper.example
+    description: Placeholder origin; consumers configure their tenant gateway URL.
+tags:
+  - name: Identity
+    description: Verified customer identity for the embedded support experience.
+  - name: Conversations
+    description: Customer-owned support threads and messages.
+  - name: Unread
+    description: Customer-side unread state.
+  - name: Service operations
+    description: Tenant backend lifecycle and erasure operations; never exposed to a customer client.
+security:
+  - customerToken: []
+paths:
+  /v1/identity:
+    get:
+      operationId: getCustomerIdentity
+      summary: Get widget-safe customer identity
+      tags: [Identity]
+      responses:
+        "200":
+          description: Widget-safe identity derived from the verified customer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerIdentity"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/conversations:
+    get:
+      operationId: listCustomerConversations
+      summary: List the customer's conversations
+      tags: [Conversations]
+      responses:
+        "200":
+          description: Customer-owned conversation summaries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationList"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createCustomerConversation
+      summary: Create a customer conversation
+      tags: [Conversations]
+      responses:
+        "201":
+          description: Newly created customer conversation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationResult"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/unread:
+    get:
+      operationId: getCustomerUnread
+      summary: Get customer-side unread state
+      description: This read does not create a contact when the customer has never used support.
+      tags: [Unread]
+      responses:
+        "200":
+          description: Total unread messages and every unread thread, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnreadSummary"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  "/v1/conversations/{conversationId}/seen":
+    parameters:
+      - $ref: "#/components/parameters/ConversationId"
+    post:
+      operationId: markCustomerConversationSeen
+      summary: Mark a customer conversation seen
+      tags: [Unread]
+      responses:
+        "200":
+          description: Persisted customer-side seen marker.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SeenResult"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  "/v1/conversations/{conversationId}/messages":
+    parameters:
+      - $ref: "#/components/parameters/ConversationId"
+    get:
+      operationId: listCustomerMessages
+      summary: List visible messages in a customer conversation
+      description: Private agent notes and activity records are never returned.
+      tags: [Conversations]
+      parameters:
+        - name: after
+          in: query
+          required: false
+          description: Return messages with a larger monotonic identifier.
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Visible customer conversation messages.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageList"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: sendCustomerMessage
+      summary: Send a customer message
+      tags: [Conversations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendMessageInput"
+      responses:
+        "201":
+          description: Created customer message.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResult"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/anonymous-conversations/claim:
+    post:
+      operationId: claimAnonymousConversation
+      summary: Claim a signed-out widget conversation after sign-in
+      description: |
+        The widget token proves possession of the anonymous thread. The gateway
+        refuses identified, foreign-tenant, or email-mismatched contacts.
+      tags: [Conversations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClaimConversationInput"
+      responses:
+        "200":
+          description: Safe claim result; refusals are represented as explicit statuses.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClaimConversationResult"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/lifecycle-messages:
+    post:
+      operationId: deliverCustomerLifecycleMessage
+      summary: Deliver one idempotent lifecycle campaign message
+      description: Requires a short-lived token with the support:lifecycle scope.
+      tags: [Service operations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LifecycleMessageInput"
+      responses:
+        "200":
+          description: Delivery or prior-delivery result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LifecycleMessageResult"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/contacts/erasure-preview:
+    post:
+      operationId: previewCustomerErasure
+      summary: Preview tenant-owned contacts selected for erasure
+      description: Requires a short-lived support:erase token bound to the canonical target hash.
+      tags: [Service operations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ErasureTargetsInput"
+      responses:
+        "200":
+          description: Read-only erasure preview.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErasureSummary"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/contacts:
+    delete:
+      operationId: eraseCustomers
+      summary: Erase tenant-owned customer contacts
+      description: Requires a short-lived support:erase token bound to the canonical target hash.
+      tags: [Service operations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ErasureTargetsInput"
+      responses:
+        "200":
+          description: Verified contact absence and asynchronous cascade state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErasureSummary"
+        "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+components:
+  securitySchemes:
+    customerToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Short-lived token bound to one tenant and one stable customer subject.
+  parameters:
+    ConversationId:
+      name: conversationId
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+  responses:
+    Error:
+      description: Stable customer-safe error. Upstream provider text is never returned.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CustomerError"
+  schemas:
+    Conversation:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          status,
+          createdAt,
+          updatedAt,
+          unreadCount,
+          unreadForContact,
+          lastSeenAt,
+          preview,
+        ]
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum: [open, pending, resolved, snoozed]
+        createdAt:
+          type: [integer, string, "null"]
+        updatedAt:
+          type: [integer, string, "null"]
+        unreadCount:
+          type: integer
+          minimum: 0
+          description: Chatwoot agent-side unread count; do not use for a customer badge.
+        unreadForContact:
+          type: integer
+          minimum: 0
+          description: Customer-side unread count used for product badges.
+        lastSeenAt:
+          type: [integer, "null"]
+        preview:
+          type: [string, "null"]
+    Attachment:
+      type: object
+      additionalProperties: false
+      required: [id, fileType, dataUrl, thumbUrl]
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        fileType:
+          type: [string, "null"]
+        dataUrl:
+          type: [string, "null"]
+          format: uri
+        thumbUrl:
+          type: [string, "null"]
+          format: uri
+    Message:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          conversationId,
+          content,
+          contentType,
+          contentAttributes,
+          messageType,
+          createdAt,
+          sender,
+          attachments,
+        ]
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        conversationId:
+          type: integer
+          minimum: 1
+        content:
+          type: [string, "null"]
+        contentType:
+          type: string
+        contentAttributes:
+          type: object
+          additionalProperties: true
+        messageType:
+          type: integer
+        createdAt:
+          type: [integer, string, "null"]
+        sender:
+          oneOf:
+            - $ref: "#/components/schemas/MessageSender"
+            - type: "null"
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Attachment"
+    MessageSender:
+      type: object
+      additionalProperties: false
+      required: [name, avatarUrl]
+      properties:
+        name:
+          type: [string, "null"]
+        avatarUrl:
+          type: [string, "null"]
+          format: uri
+    CustomerIdentity:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          baseUrl,
+          websiteToken,
+          subject,
+          identifier,
+          identifierHash,
+          email,
+          name,
+        ]
+      properties:
+        baseUrl:
+          type: string
+          format: uri
+        websiteToken:
+          type: string
+        subject:
+          type: string
+        identifier:
+          type: string
+        identifierHash:
+          type: string
+        email:
+          type: [string, "null"]
+          format: email
+        name:
+          type: string
+    ConversationList:
+      type: object
+      additionalProperties: false
+      required: [conversations, widgetConversationId]
+      properties:
+        conversations:
+          type: array
+          items:
+            $ref: "#/components/schemas/Conversation"
+        widgetConversationId:
+          type: [integer, "null"]
+          minimum: 1
+    ConversationResult:
+      type: object
+      additionalProperties: false
+      required: [conversation]
+      properties:
+        conversation:
+          $ref: "#/components/schemas/Conversation"
+    UnreadSummary:
+      type: object
+      additionalProperties: false
+      required: [unreadCount, conversation, conversations]
+      properties:
+        unreadCount:
+          type: integer
+          minimum: 0
+        conversation:
+          oneOf:
+            - $ref: "#/components/schemas/Conversation"
+            - type: "null"
+        conversations:
+          type: array
+          items:
+            $ref: "#/components/schemas/Conversation"
+    SeenResult:
+      type: object
+      additionalProperties: false
+      required: [conversationId, seen, seenAt]
+      properties:
+        conversationId:
+          type: integer
+          minimum: 1
+        seen:
+          type: boolean
+          const: true
+        seenAt:
+          type: integer
+          minimum: 0
+        seenMessageId:
+          type: integer
+          minimum: 1
+    MessageList:
+      type: object
+      additionalProperties: false
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/Message"
+    MessageResult:
+      type: object
+      additionalProperties: false
+      required: [message]
+      properties:
+        message:
+          $ref: "#/components/schemas/Message"
+    SendMessageInput:
+      type: object
+      additionalProperties: false
+      required: [content]
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 16000
+    ClaimConversationInput:
+      type: object
+      additionalProperties: false
+      required: [widgetToken]
+      properties:
+        widgetToken:
+          type: string
+          minLength: 1
+          maxLength: 16384
+    ClaimConversationResult:
+      type: object
+      additionalProperties: false
+      required: [status, conversations]
+      properties:
+        status:
+          type: string
+          enum:
+            [
+              merged,
+              already_claimed,
+              already_identified,
+              email_mismatch,
+              foreign_contact,
+              invalid_token,
+              not_found,
+            ]
+        conversations:
+          type: integer
+          minimum: 0
+    LifecycleMessageInput:
+      type: object
+      additionalProperties: false
+      required: [campaign]
+      properties:
+        campaign:
+          type: string
+          enum: [trial_day_1, trial_day_2, trial_day_6]
+    LifecycleMessageResult:
+      type: object
+      additionalProperties: false
+      required: [campaign, status]
+      properties:
+        campaign:
+          type: string
+          enum: [trial_day_1, trial_day_2, trial_day_6]
+        status:
+          type: string
+          enum: [delivered, already_delivered]
+        conversationId:
+          type: [integer, "null"]
+          minimum: 1
+        deliveredAt:
+          type: string
+          format: date-time
+        stamped:
+          type: boolean
+    ErasureTarget:
+      type: object
+      additionalProperties: false
+      anyOf:
+        - required: [userId]
+        - required: [email]
+      properties:
+        userId:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 255
+        email:
+          type: [string, "null"]
+          format: email
+          maxLength: 254
+    ErasureTargetsInput:
+      type: object
+      additionalProperties: false
+      required: [targets]
+      properties:
+        targets:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/ErasureTarget"
+    ErasureSummary:
+      type: object
+      additionalProperties: true
+      required: [attempted, accepted, verifiedAbsent, failed]
+      properties:
+        attempted:
+          type: integer
+          minimum: 0
+        accepted:
+          type: integer
+          minimum: 0
+        verifiedAbsent:
+          type: integer
+          minimum: 0
+        failed:
+          type: integer
+          minimum: 0
+        dryRun:
+          type: boolean
+        cascadeQueued:
+          type: boolean
+        partialFailure:
+          type: boolean
+    CustomerError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string
