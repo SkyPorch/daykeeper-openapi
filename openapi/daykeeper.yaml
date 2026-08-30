@@ -6,7 +6,7 @@ info:
   description: |
     Daykeeper owns tenant lifecycle, support-channel provisioning, durable
     operations, and versioned flows. Mutations that create external resources
-    use plan/apply and idempotency. Provider and Chatwoot credentials and
+    use plan/apply and idempotency. Infrastructure-provider credentials and
     identifiers are never part of this contract.
   contact:
     name: SkyPorch
