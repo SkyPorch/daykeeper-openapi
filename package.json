@@ -15,7 +15,7 @@
     "lint": "redocly lint openapi/daykeeper.yaml openapi/customer.yaml"
   },
   "devDependencies": {
-    "@redocly/cli": "2.48.0",
+    "@redocly/cli": "2.49.0",
     "prettier": "3.9.6"
   }
 }

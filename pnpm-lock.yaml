@@ -9,16 +9,16 @@ importers:
   .:
     devDependencies:
       '@redocly/cli':
-        specifier: 2.48.0
-        version: 2.48.0
+        specifier: 2.49.0
+        version: 2.49.0
       prettier:
         specifier: 3.9.6
         version: 3.9.6
 
 packages:
 
-  '@redocly/cli@2.48.0':
-    resolution: {integrity: sha512-f8oG6qK6bXaXWNOIr5G92doHirEqcOfJYP4JKQpGkJfb7/btQXjU/81sMeyQajnGVVUvD6JfuSNC9VOmra7LkA==}
+  '@redocly/cli@2.49.0':
+    resolution: {integrity: sha512-87UuARXYrPIiHhd/UriamL4BApuPgB0E91coBtoPG6PK4giTwiuo3dI4RoyMGhsC7TwgAnL8PJuhCwGymgwbVA==}
     engines: {node: '>=22.12.0 || >=20.19.0 <21.0.0', npm: '>=10'}
     hasBin: true
 
@@ -29,6 +29,6 @@ packages:
 
 snapshots:
 
-  '@redocly/cli@2.48.0': {}
+  '@redocly/cli@2.49.0': {}
 
   prettier@3.9.6: {}
