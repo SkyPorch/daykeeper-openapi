@@ -36,6 +36,24 @@ Release coordination must account for the existing tenant-apply compatibility
 impact before enforcing assignments for current consumers; the new read
 operation itself is additive under [`VERSIONING.md`](VERSIONING.md).
 
+## Unreleased first-inbox contract
+
+An optional `website` on the existing tenant plan prepares one website inbox.
+Check `capabilities().websiteInboxes.enabled` before requesting it; an absent
+capability on an older server means unsupported. Account-only plans are
+unchanged, and the operation remains `tenant.provision`.
+
+`GET /v1/tenants/{tenantId}/website-channel` requires `daykeeper.accounts:read`
+and returns non-cacheable tenant metadata, never provider credentials. Exact
+HTTPS origins are normalized and must include the website origin. Inspect the
+durable operation on failure; do not create another tenant as a retry strategy.
+
+`prepared` is not ready for traffic: `trafficEnabled` remains false until
+routing, signed identity, usage enforcement and installation checks are
+implemented. This contract does not add activation, credential export, signup,
+payments or a shipped free tier. It is additive source for a future coordinated
+minor release, not a package publication or deployment approval.
+
 ## Check and bundle
 
 ```sh

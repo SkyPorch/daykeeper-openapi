@@ -60,6 +60,137 @@ after(() => {
   if (directory) rmSync(directory, { recursive: true, force: true });
 });
 
+test("website preparation extends tenant plan/apply without changing existing operation kinds", () => {
+  const schemas = contract.components.schemas;
+  assert.equal(
+    schemas.TenantSpec.properties.website.$ref,
+    "#/components/schemas/WebsiteInboxSpec",
+  );
+  assert.equal(schemas.TenantSpec.required.includes("website"), false);
+  assert.deepEqual(schemas.Operation.properties.kind.enum, [
+    "tenant.provision",
+    "channel.email.configure",
+  ]);
+  assert.equal(schemas.Capabilities.required.includes("websiteInboxes"), false);
+  const path = contract.paths["/v1/tenants/{tenantId}/website-channel"];
+  assert.deepEqual(Object.keys(path).sort(), ["get", "parameters"]);
+  assert.equal(path.get.operationId, "getWebsiteChannel");
+  assert.deepEqual(path.get.security, [
+    { daykeeperOAuth: ["daykeeper.accounts:read"] },
+  ]);
+  assert.equal(
+    path.get.responses["200"].headers["Cache-Control"].schema.const,
+    "no-store",
+  );
+  assert.match(path.get.description, /never activates/);
+  assert.equal(schemas.WebsiteChannel.additionalProperties, false);
+  assert.equal(schemas.WebsiteChannel.properties.state.enum, undefined);
+  assert.equal(
+    schemas.WebsiteChannel.properties.trafficEnabled.type,
+    "boolean",
+  );
+  assert.deepEqual(Object.keys(schemas.WebsiteChannel.properties).sort(), [
+    "createdAt",
+    "id",
+    "organizationId",
+    "spec",
+    "state",
+    "tenantId",
+    "trafficEnabled",
+    "updatedAt",
+    "version",
+  ]);
+});
+
+test("the OpenAPI validator accepts preparation-only status and legacy or opted-in tenant plans", () => {
+  const document = structuredClone(contract);
+  const request =
+    document.paths["/v1/tenant-plans"].post.requestBody.content[
+      "application/json"
+    ];
+  const account = {
+    name: "Website account",
+    slug: "website-account",
+    locale: "en",
+    administrator: { name: "Owner", email: "owner@example.test" },
+  };
+  request.examples = {
+    legacy: { value: account },
+    website: {
+      value: {
+        ...account,
+        website: {
+          websiteUrl: "https://EXAMPLE.test:443/",
+          allowedOrigins: [
+            "https://example.test",
+            "https://other.example.test",
+          ],
+        },
+      },
+    },
+  };
+  const result = lintDocument(document, "website-valid-examples");
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test("the OpenAPI validator rejects secret-bearing website metadata and unsafe request examples", () => {
+  const document = structuredClone(contract);
+  const response =
+    document.paths["/v1/tenants/{tenantId}/website-channel"].get.responses[
+      "200"
+    ].content["application/json"];
+  const mutations = {
+    providerSecret: (data) => {
+      data.apiToken = "must-never-be-returned";
+    },
+    providerInbox: (data) => {
+      data.providerInboxId = "42";
+    },
+    missingActivationState: (data) => {
+      delete data.trafficEnabled;
+    },
+    unsafeOrigin: (data) => {
+      data.spec.allowedOrigins = ["https://example.test,evil.test"];
+    },
+    insecureUrl: (data) => {
+      data.spec.websiteUrl = "http://example.test";
+    },
+    injectedSecurity: (data) => {
+      data.spec.hmacMandatory = false;
+    },
+    emptyAllowlist: (data) => {
+      data.spec.allowedOrigins = [];
+    },
+    duplicateOrigin: (data) => {
+      data.spec.allowedOrigins = [
+        "https://example.test",
+        "https://example.test",
+      ];
+    },
+  };
+  for (const [name, mutate] of Object.entries(mutations)) {
+    const value = structuredClone(response.examples.prepared.value);
+    mutate(value.data);
+    response.examples[name] = { value };
+  }
+  const result = lintDocument(document, "website-invalid-examples");
+  assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+  const problems = JSON.parse(result.stdout).problems.filter(
+    (problem) =>
+      problem.ruleId === "no-invalid-media-type-examples" &&
+      problem.severity === "error",
+  );
+  for (const name of Object.keys(mutations))
+    assert.ok(
+      problems.some((problem) =>
+        problem.location.some((location) =>
+          location.pointer.includes(`/examples/${name}/value`),
+        ),
+      ),
+      `Expected schema rejection for ${name}: ${result.stdout}`,
+    );
+});
+
 test("entitlements are a non-cacheable current-organization read with exact account scope", () => {
   const item = contract.paths["/v1/entitlements"];
   assert.deepEqual(Object.keys(item), ["get"]);

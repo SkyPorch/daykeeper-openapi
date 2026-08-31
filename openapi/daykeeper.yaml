@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Daykeeper Management API
-  version: 0.1.0
+  version: 0.2.0
   summary: Safe, multi-tenant support administration for people and agents.
   description: |
     Daykeeper owns tenant lifecycle, support-channel provisioning, durable
@@ -28,6 +28,8 @@ tags:
     description: Short-lived customer and service tokens for a tenant gateway.
   - name: Email channels
     description: Email-domain planning, DNS evidence, and round-trip readiness.
+  - name: Website channels
+    description: First-inbox preparation and observed installation readiness.
   - name: Operations
     description: Durable, inspectable provisioning work.
   - name: Flows
@@ -149,6 +151,14 @@ paths:
     post:
       operationId: planTenant
       summary: Plan creation of a tenant
+      description: |
+        Optional website settings prepare the first website inbox in this same
+        tenant operation. Inspect websiteInboxes in capabilities first; disabled
+        provisioning rejects website settings with FEATURE_UNAVAILABLE. Omitting
+        website preserves account-only behavior. Plans with website settings
+        explain that preparation does not enable traffic. Existing entitlement,
+        idempotency and plan-expiry rules still apply. No provider identifier or
+        credential is returned, and preparation is not a successful client test.
       tags: [Tenants]
       security:
         - daykeeperOAuth:
@@ -412,6 +422,56 @@ paths:
               schema:
                 $ref: "#/components/schemas/EmailChannelResponse"
         "401":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  "/v1/tenants/{tenantId}/website-channel":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      operationId: getWebsiteChannel
+      summary: Inspect the tenant's first website inbox
+      description: |
+        A non-cacheable status read, available after an accepted tenant plan
+        containing website settings. Prepared does not mean customer traffic is
+        enabled: routing, identity checks, usage enforcement and installation
+        verification must all pass before activation. This read never activates
+        a channel, returns provider credentials, or creates another inbox.
+      tags: [Website channels]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:read]
+      responses:
+        "200":
+          description: Public website-channel metadata without provider secrets.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebsiteChannelResponse"
+              examples:
+                prepared:
+                  value:
+                    data:
+                      id: "30000000-0000-4000-8000-000000000001"
+                      organizationId: "10000000-0000-4000-8000-000000000001"
+                      tenantId: "20000000-0000-4000-8000-000000000001"
+                      spec:
+                        websiteUrl: https://example.test/
+                        allowedOrigins: [https://example.test]
+                      state: prepared
+                      trafficEnabled: false
+                      version: 2
+                      createdAt: "2026-08-31T00:00:00.000Z"
+                      updatedAt: "2026-08-31T00:01:00.000Z"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
           $ref: "#/components/responses/Error"
         default:
           $ref: "#/components/responses/Error"
@@ -721,6 +781,17 @@ components:
           properties:
             enabled:
               type: boolean
+        websiteInboxes:
+          type: object
+          additionalProperties: false
+          description: Optional on older servers. Absent or disabled means website settings are not supported.
+          required: [enabled, trafficActivation]
+          properties:
+            enabled:
+              type: boolean
+            trafficActivation:
+              type: boolean
+              description: Whether self-serve traffic activation is implemented and enabled. Preparation alone is insufficient.
         customerSessions:
           type: object
           additionalProperties: false
@@ -891,6 +962,8 @@ components:
           type: string
           format: email
           maxLength: 254
+        website:
+          $ref: "#/components/schemas/WebsiteInboxSpec"
         administrator:
           type: object
           additionalProperties: false
@@ -904,6 +977,77 @@ components:
               type: string
               format: email
               maxLength: 254
+    WebsiteInboxSpec:
+      type: object
+      additionalProperties: false
+      required: [websiteUrl]
+      description: |
+        Exact HTTPS root URLs only; the scheme must be lowercase https. No
+        credentials, query, fragment, path, whitespace, delimiter or wildcard.
+        Hostnames must be valid DNS names or IP literals. The server normalizes default ports, host case and a trailing
+        slash. allowedOrigins defaults to the website origin; when supplied it
+        must include that origin and contain no duplicates after normalization.
+        Origins are returned in sorted canonical form. Domain settings are
+        not a substitute for signed customer identity or server authorization.
+      properties:
+        websiteUrl:
+          type: string
+          format: uri
+          maxLength: 2048
+          pattern: '^https://[^/?#@\s\\*;,]+/?$'
+        allowedOrigins:
+          type: array
+          minItems: 1
+          maxItems: 10
+          uniqueItems: true
+          items:
+            type: string
+            format: uri
+            maxLength: 2048
+            pattern: '^https://[^/?#@\s\\*;,]+/?$'
+    WebsiteChannel:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          organizationId,
+          tenantId,
+          spec,
+          state,
+          trafficEnabled,
+          version,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        spec:
+          $ref: "#/components/schemas/WebsiteInboxSpec"
+        state:
+          type: string
+          description: Extensible observed state. Current values are provisioning, prepared, and degraded. Treat unknown states as not ready; always inspect trafficEnabled independently.
+          examples: [prepared]
+        trafficEnabled:
+          type: boolean
+          description: False until the complete activation boundary is implemented and verified. A succeeded provisioning operation alone does not make this true.
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
     Tenant:
       type: object
       additionalProperties: false
@@ -1691,6 +1835,13 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/CustomerSession"
+    WebsiteChannelResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/WebsiteChannel"
     EmailChannelPlanResponse:
       allOf:
         - $ref: "#/components/schemas/SuccessEnvelope"
