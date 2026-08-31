@@ -54,6 +54,21 @@ implemented. This contract does not add activation, credential export, signup,
 payments or a shipped free tier. It is additive source for a future coordinated
 minor release, not a package publication or deployment approval.
 
+## Unreleased customer usage errors
+
+Customer errors retain the required `error` code. Optional `message`, `retryable`
+and `nextAction` fields add safe explanations and recovery advice. Existing
+`{ "error": "..." }` responses remain valid. Do not automatically replay a request
+with `retryable: false`, even when its HTTP status is 429 or 503. A retryable hint
+does not make an uncertain write safe to repeat; reconcile its outcome first.
+
+Managed usage errors include `daykeeper_usage_limit_exceeded` (429),
+`daykeeper_usage_not_enabled` and `daykeeper_support_not_ready` (403),
+`daykeeper_resource_conflict` (409), and `daykeeper_support_unavailable` (503).
+These are opt-in implementation contracts, not automatic customer activation,
+billing approval, or a release. The customer schema change is additive source
+for the next coordinated minor release; no tag is created here.
+
 ## Check and bundle
 
 ```sh

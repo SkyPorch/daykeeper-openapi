@@ -599,3 +599,20 @@ components:
       properties:
         error:
           type: string
+          description: Stable error code. Codes are extensible; handle unknown values safely.
+        message:
+          type: string
+          maxLength: 180
+          description: Optional customer-safe explanation, never infrastructure diagnostics.
+        retryable:
+          type: boolean
+          description: |
+            Optional server retry advice. False means do not automatically replay
+            this request, including a 429 usage ceiling. Absence preserves older
+            status-based handling. True does not guarantee a write is idempotent.
+        nextAction:
+          type: string
+          description: |
+            Optional next step. Known values are review_usage, review_setup and
+            refresh_conversation. Values are extensible and grant no authority
+            to change billing, budgets or account configuration.
