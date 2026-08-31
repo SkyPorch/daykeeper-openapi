@@ -26,7 +26,8 @@ scope see the organization-wide admission count.
 
 The `free-2026-08-31` policy's one-tenant allowance is a provisional provisioning
 safeguard, not approved marketing pricing or a shipped self-serve free tier.
-Conversation and storage metering are explicitly `not_enforced`. A missing,
+Legacy `metering` fields remain `not_enforced` for compatibility but are
+deprecated: they do not inspect optional provider enforcement. A missing,
 revoked, or exhausted assignment remains a successful status read; the
 structured `ENTITLEMENT_REQUIRED` (403), `ENTITLEMENT_INACTIVE` (403), and
 `TENANT_QUOTA_EXCEEDED` (409) errors describe new tenant admission failures.
@@ -35,6 +36,23 @@ This source change creates no release, deployment approval, or SDK publication.
 Release coordination must account for the existing tenant-apply compatibility
 impact before enforcing assignments for current consumers; the new read
 operation itself is additive under [`VERSIONING.md`](VERSIONING.md).
+
+## Unreleased usage inspection
+
+`GET /v1/usage` requires organization-wide `daykeeper.billing:read` and rejects
+tenant-bound credentials and query selectors. It returns a non-cacheable,
+current-UTC-month snapshot of recorded contact, conversation, and message
+resources pooled within one cell. These are provisional safety ceilings, not
+billable resolutions or delivery counts. Legacy traffic is not backfilled.
+
+Absent assignments have null limits, not unlimited usage. Paused and exhausted
+assignments still return status. `writeAdmission: "not_evaluated"` means neither
+remaining capacity nor a new month grants traffic access. There is no reset,
+upgrade, assignment, or activation operation. Older servers may omit the
+optional `capabilities.usage` field; do not turn a 404 into an automatic write.
+
+This is unreleased additive source. SDK, CLI and MCP adoption requires a
+coordinated approved release; it does not grant installation or billing approval.
 
 ## Unreleased first-inbox contract
 
