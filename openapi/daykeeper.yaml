@@ -24,6 +24,8 @@ tags:
     description: Current-organization admission policy and enforced-resource discovery.
   - name: Usage
     description: Organization-wide recorded resource-safety counters, not billing or traffic admission.
+  - name: Agent credentials
+    description: Reveal-once, owner-managed credentials for headless workloads that cannot use hosted OAuth.
   - name: Tenants
     description: Tenant planning, provisioning, and observed state.
   - name: Customer sessions
@@ -245,6 +247,166 @@ paths:
         "403":
           $ref: "#/components/responses/Error"
           description: Missing billing-read scope (SCOPE_REQUIRED) or tenant-bound credential (ORGANIZATION_ACCESS_REQUIRED). Non-retryable; obtain organization-wide access.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/agent-credentials:
+    get:
+      operationId: listAgentCredentials
+      summary: List the current organization's agent credentials
+      description: |
+        Requires a current human organization owner and
+        daykeeper.credentials:read. The organization comes only from the
+        verified principal; no organization, pagination, or filter selector is
+        accepted. Up to 100 bounded metadata records are returned, with all
+        active credentials ahead of recent inactive history. `hasMore` reports
+        omitted older history. Tokens and token hashes are never returned.
+
+        Hosted OAuth remains the preferred workload identity. This list does
+        not create, renew, recover, rotate, or reactivate a credential.
+      tags: [Agent credentials]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.credentials:read
+      responses:
+        "200":
+          description: Bounded credential metadata for the authenticated organization.
+          headers:
+            Cache-Control:
+              description: Credential metadata must not be cached.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentCredentialPageResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+          description: Missing credential-read scope or current human owner authority.
+        "503":
+          $ref: "#/components/responses/Error"
+          description: Agent credential management is not enabled (FEATURE_UNAVAILABLE).
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createAgentCredential
+      summary: Create a reveal-once agent credential
+      description: |
+        Requires a current human organization owner and
+        daykeeper.credentials:write. The same Idempotency-Key may be submitted
+        again only with the exact original body to reconcile an uncertain
+        response. A fresh write returns the token exactly once. A successful
+        replay returns the original metadata with `token: null`; no secret can
+        be recovered. Do not automatically retry this mutation with a new key.
+
+        The credential expires, cannot administer credentials or members, and
+        can receive only the explicitly selected delegable scopes. Hosted OAuth
+        remains the preferred workload identity.
+      tags: [Agent credentials]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.credentials:write
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAgentCredentialInput"
+      responses:
+        "200":
+          description: The exact original request was replayed; the secret is no longer available.
+          headers:
+            Cache-Control:
+              description: Reveal-once results must not be cached.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateAgentCredentialResponse"
+        "201":
+          description: A credential was created and its secret is revealed exactly once.
+          headers:
+            Cache-Control:
+              description: Reveal-once results must not be cached.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateAgentCredentialResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+          description: Missing credential-write scope or current human owner authority.
+        "409":
+          $ref: "#/components/responses/Error"
+          description: Idempotency input changed or the active credential limit was reached.
+        "429":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+          description: Agent credential management is not enabled (FEATURE_UNAVAILABLE).
+        default:
+          $ref: "#/components/responses/Error"
+  "/v1/agent-credentials/{agentCredentialId}/revoke":
+    parameters:
+      - $ref: "#/components/parameters/AgentCredentialId"
+    post:
+      operationId: revokeAgentCredential
+      summary: Revoke an agent credential
+      description: |
+        Requires a current human organization owner and
+        daykeeper.credentials:write. Revocation atomically disables the
+        underlying principal grant and is safe to repeat. It never creates,
+        replaces, recovers, or returns a secret.
+      tags: [Agent credentials]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.credentials:write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "200":
+          description: The credential is revoked, including an idempotent replay.
+          headers:
+            Cache-Control:
+              description: Credential mutation results must not be cached.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevokeAgentCredentialResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+          description: Missing credential-write scope or current human owner authority.
+        "404":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+          description: Agent credential management is not enabled (FEATURE_UNAVAILABLE).
         default:
           $ref: "#/components/responses/Error"
   /v1/tenant-plans:
@@ -842,6 +1004,8 @@ components:
             daykeeper.accounts:read: Read organizations and tenants.
             daykeeper.accounts:write: Plan organization and tenant changes.
             daykeeper.billing:read: Read organization-wide usage and billing status.
+            daykeeper.credentials:read: List organization agent credential metadata.
+            daykeeper.credentials:write: Create and revoke organization agent credentials as a human owner.
             daykeeper.flows:read: Read flow metadata and versions.
             daykeeper.flows:write: Create flows and immutable versions.
             daykeeper.flows:publish: Publish reviewed flow versions.
@@ -889,6 +1053,13 @@ components:
       schema:
         type: integer
         minimum: 1
+    AgentCredentialId:
+      name: agentCredentialId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
   responses:
     Error:
       description: Structured Daykeeper error. Resource denials do not disclose cross-tenant existence.
@@ -956,6 +1127,20 @@ components:
             scope:
               type: string
               const: organization
+        agentCredentials:
+          type: object
+          additionalProperties: false
+          description: Optional on older servers. Enabled discovery does not grant owner authority or credential scopes.
+          required: [enabled, reveal, maximumValidityDays]
+          properties:
+            enabled:
+              type: boolean
+            reveal:
+              type: string
+              const: once
+            maximumValidityDays:
+              type: integer
+              const: 90
         flows:
           type: object
           additionalProperties: false
@@ -2012,11 +2197,137 @@ components:
         expectedResourceVersion:
           type: integer
           minimum: 1
+    AgentCredentialScope:
+      type: string
+      description: A scope that a human owner may delegate to a headless agent credential.
+      enum:
+        - daykeeper.accounts:read
+        - daykeeper.accounts:write
+        - daykeeper.flows:read
+        - daykeeper.flows:write
+        - daykeeper.flows:publish
+        - daykeeper.provisioning:read
+        - daykeeper.provisioning:apply
+        - daykeeper.billing:read
+    AgentCredential:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          organizationId,
+          name,
+          hint,
+          scopes,
+          state,
+          expiresAt,
+          lastUsedAt,
+          revokedAt,
+          createdAt,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+          description: Organization derived from the authenticated owner.
+        name:
+          type: string
+          minLength: 2
+          maxLength: 80
+        hint:
+          type: string
+          pattern: "^dk_agent_[0-9a-f]{8}…[A-Za-z0-9_-]{4}$"
+          description: Bounded display hint; never usable as a bearer credential.
+        scopes:
+          type: array
+          minItems: 1
+          maxItems: 8
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/AgentCredentialScope"
+        state:
+          type: string
+          enum: [active, expired, revoked]
+        expiresAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: [string, "null"]
+          format: date-time
+        revokedAt:
+          type: [string, "null"]
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+    AgentCredentialPage:
+      type: object
+      additionalProperties: false
+      required: [items, hasMore]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/AgentCredential"
+        hasMore:
+          type: boolean
+          description: True when older inactive history was omitted.
+    CreateAgentCredentialInput:
+      type: object
+      additionalProperties: false
+      required: [name, scopes]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 80
+        scopes:
+          type: array
+          minItems: 1
+          maxItems: 8
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/AgentCredentialScope"
+        validityDays:
+          type: integer
+          minimum: 1
+          maximum: 90
+          default: 30
+    CreateAgentCredentialResult:
+      type: object
+      additionalProperties: false
+      description: A fresh result has a token and replayed false; a replay has token null and replayed true.
+      required: [credential, token, replayed]
+      properties:
+        credential:
+          $ref: "#/components/schemas/AgentCredential"
+        token:
+          type: [string, "null"]
+          pattern: "^dk_agent_[0-9a-f]{32}_[A-Za-z0-9_-]{43}$"
+          description: Sensitive bearer token revealed only on the original successful response. Never log or persist it outside a secret manager.
+        replayed:
+          type: boolean
+    RevokeAgentCredentialResult:
+      type: object
+      additionalProperties: false
+      required: [credential, replayed]
+      properties:
+        credential:
+          $ref: "#/components/schemas/AgentCredential"
+        replayed:
+          type: boolean
     DaykeeperScope:
       type: string
       enum:
         - daykeeper.accounts:read
         - daykeeper.accounts:write
+        - daykeeper.billing:read
+        - daykeeper.credentials:read
+        - daykeeper.credentials:write
         - daykeeper.flows:read
         - daykeeper.flows:write
         - daykeeper.flows:publish
@@ -2075,6 +2386,27 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/UsageStatus"
+    AgentCredentialPageResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/AgentCredentialPage"
+    CreateAgentCredentialResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/CreateAgentCredentialResult"
+    RevokeAgentCredentialResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/RevokeAgentCredentialResult"
     TenantPlanResponse:
       allOf:
         - $ref: "#/components/schemas/SuccessEnvelope"
