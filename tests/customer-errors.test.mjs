@@ -56,7 +56,7 @@ after(() => {
 test("customer error advice is optional, extensible and does not change legacy required fields", () => {
   const error = contract.components.schemas.CustomerError;
   assert.deepEqual(error.required, ["error"]);
-  assert.equal(error.additionalProperties, false);
+  assert.equal(error.additionalProperties, true);
   assert.equal(error.properties.error.enum, undefined);
   assert.equal(error.properties.nextAction.enum, undefined);
   assert.equal(error.properties.retryable.type, "boolean");
@@ -65,7 +65,7 @@ test("customer error advice is optional, extensible and does not change legacy r
     /do not automatically replay/,
   );
 });
-test("the actual OpenAPI validator accepts legacy and managed quota responses", () => {
+test("the actual OpenAPI validator accepts legacy, managed quota and newer-field responses", () => {
   const result = validate(
     {
       legacy: { value: { error: "expired_token" } },
@@ -84,19 +84,20 @@ test("the actual OpenAPI validator accepts legacy and managed quota responses", 
           nextAction: "future_action",
         },
       },
+      unknownField: {
+        value: { error: "quota", sqlDiagnostic: "added by a newer server" },
+      },
     },
     "valid",
   );
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 });
-test("the actual OpenAPI validator rejects malformed hints and extra diagnostic fields", () => {
+test("the actual OpenAPI validator rejects malformed hints and a missing error code", () => {
   const result = validate(
     {
       stringHint: { value: { error: "quota", retryable: "false" } },
       nullAction: { value: { error: "quota", nextAction: null } },
-      diagnostics: {
-        value: { error: "quota", sqlDiagnostic: "not part of the contract" },
-      },
+      missingError: { value: { message: "no stable code was supplied" } },
       longMessage: { value: { error: "quota", message: "x".repeat(181) } },
     },
     "invalid",
@@ -106,7 +107,7 @@ test("the actual OpenAPI validator rejects malformed hints and extra diagnostic 
   for (const name of [
     "stringHint",
     "nullAction",
-    "diagnostics",
+    "missingError",
     "longMessage",
   ]) {
     assert.ok(
