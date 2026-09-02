@@ -223,7 +223,7 @@ test("entitlements are a non-cacheable current-organization read with exact acco
   );
 });
 
-test("the provisional policy and unenforced meters match the implementation", () => {
+test("the provisional policy and deprecated admission-only meters retain wire compatibility", () => {
   const examples = media(contract).examples;
   assert.deepEqual(examples.available.value.data.policy, {
     version: "free-2026-08-31",
@@ -235,6 +235,11 @@ test("the provisional policy and unenforced meters match the implementation", ()
     conversations: "not_enforced",
     storage: "not_enforced",
   });
+  assert.equal(
+    contract.components.schemas.EntitlementStatus.properties.metering
+      .deprecated,
+    true,
+  );
   assert.equal(examples.unconfigured.value.data.policy, null);
   assert.equal(examples.unconfigured.value.data.assignmentVersion, null);
   assert.deepEqual(examples.unconfigured.value.data.tenantProvisioning, {
@@ -252,6 +257,120 @@ test("the provisional policy and unenforced meters match the implementation", ()
   assert.equal(limit.minimum, 1);
   assert.equal(limit.const, undefined);
   assert.equal(limit.enum, undefined);
+});
+
+test("usage is an organization-only billing read with no selectors or mutations", () => {
+  const path = contract.paths["/v1/usage"];
+  assert.deepEqual(Object.keys(path), ["get"]);
+  assert.equal(path.get.operationId, "getUsage");
+  assert.deepEqual(path.get.security, [
+    { daykeeperOAuth: ["daykeeper.billing:read"] },
+  ]);
+  assert.equal(path.get.parameters, undefined);
+  assert.equal(path.get.requestBody, undefined);
+  assert.match(path.get.description, /Tenant-bound/);
+  assert.match(
+    path.get.responses["403"].description,
+    /ORGANIZATION_ACCESS_REQUIRED/,
+  );
+  assert.equal(
+    path.get.responses["200"].headers["Cache-Control"].schema.const,
+    "no-store",
+  );
+  assert.equal(
+    contract.components.schemas.Capabilities.required.includes("usage"),
+    false,
+  );
+  assert.equal(
+    contract.components.schemas.UsageStatus.properties.writeAdmission.const,
+    "not_evaluated",
+  );
+  assert.equal(
+    contract.components.schemas.UsageStatus.additionalProperties,
+    false,
+  );
+});
+
+test("validator accepts configured, paused and unconfigured recorded usage", () => {
+  const document = structuredClone(contract);
+  const examples =
+    document.paths["/v1/usage"].get.responses["200"].content["application/json"]
+      .examples;
+  examples.paused = structuredClone(examples.active);
+  examples.paused.value.data.state = "paused";
+  const unconfigured = structuredClone(examples.active);
+  Object.assign(unconfigured.value.data, {
+    state: "unconfigured",
+    assignmentVersion: null,
+    policy: null,
+    nextActions: ["contact_organization_owner"],
+  });
+  for (const resource of Object.values(unconfigured.value.data.resources))
+    Object.assign(resource, {
+      limit: null,
+      remaining: null,
+      limitReached: null,
+    });
+  examples.unconfigured = unconfigured;
+  const result = lintDocument(document, "usage-valid-examples");
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test("validator rejects unsafe or fabricated usage examples", () => {
+  const document = structuredClone(contract);
+  const examples =
+    document.paths["/v1/usage"].get.responses["200"].content["application/json"]
+      .examples;
+  const mutations = {
+    unsafeCount: (data) => {
+      data.resources.messageRecords.used = 9007199254740992;
+    },
+    negativeCount: (data) => {
+      data.resources.contactRecords.used = -1;
+    },
+    fractionalLimit: (data) => {
+      data.resources.messageRecords.limit = 1.5;
+    },
+    excessLimit: (data) => {
+      data.resources.messageRecords.limit = 100000001;
+    },
+    fabricatedAdmission: (data) => {
+      data.writeAdmission = "allowed";
+    },
+    fabricatedBilling: (data) => {
+      data.kind = "billable";
+    },
+    approvedPolicy: (data) => {
+      data.policy.provisional = false;
+    },
+    providerSecret: (data) => {
+      data.apiToken = "never-returned";
+    },
+    missingCounter: (data) => {
+      delete data.resources.messageRecords;
+    },
+  };
+  for (const [name, mutate] of Object.entries(mutations)) {
+    const value = structuredClone(examples.active.value);
+    mutate(value.data);
+    examples[name] = { value };
+  }
+  const result = lintDocument(document, "usage-invalid-examples");
+  assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+  const problems = JSON.parse(result.stdout).problems.filter(
+    (problem) =>
+      problem.ruleId === "no-invalid-media-type-examples" &&
+      problem.severity === "error",
+  );
+  for (const name of Object.keys(mutations))
+    assert.ok(
+      problems.some((problem) =>
+        problem.location.some((location) =>
+          location.pointer.includes(`/examples/${name}/value`),
+        ),
+      ),
+      `Expected rejection for ${name}: ${result.stdout}`,
+    );
 });
 
 test("new tenant admission documents all three stable non-retryable errors", () => {
