@@ -909,7 +909,8 @@ components:
   schemas:
     Capabilities:
       type: object
-      additionalProperties: false
+      # Response envelope: open so older clients tolerate new fields.
+      additionalProperties: true
       required: [apiVersion, emailChannels, customerSessions, flows]
       properties:
         apiVersion:
@@ -1205,7 +1206,8 @@ components:
           description: Recovery hints for people and agents; never automatic authority to mutate policy.
     TenantSpec:
       type: object
-      additionalProperties: false
+      # Returned inside Tenant and TenantPlan, so it stays open for older clients.
+      additionalProperties: true
       required: [name, slug, locale, administrator]
       properties:
         name:
@@ -2025,7 +2027,8 @@ components:
         - daykeeper.customers:delete
     ErrorDetail:
       type: object
-      additionalProperties: false
+      # Response envelope: open so older clients tolerate new fields.
+      additionalProperties: true
       required: [code, message, retryable, nextActions, correlationId]
       properties:
         code:
