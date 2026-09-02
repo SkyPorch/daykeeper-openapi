@@ -84,6 +84,25 @@ A tenant adopted without a creation operation, or an older server, may return 40
 missing operation as permission to create another tenant. This additive endpoint
 is unreleased and requires coordinated server and SDK approval.
 
+## Unreleased agent credentials
+
+Hosted OAuth remains the preferred workload identity. For headless environments
+that cannot complete OAuth, a current human organization owner can list, create,
+and revoke bounded, expiring agent credentials. Creation requires an explicit
+idempotency key and returns the bearer token exactly once; an exact replay proves
+the write completed but returns `token: null`. The client must save the fresh
+token in a secret manager or revoke it and create another credential.
+
+Agent credentials can delegate only account, flow, provisioning, and billing
+read/write scopes listed by the contract. They cannot administer credentials,
+members, customer erasure, or lifecycle access. List responses are bounded and
+contain metadata only. Creation must never be automatically retried with a new
+idempotency key after an uncertain response.
+
+This contract is unreleased and requires a coordinated server and SDK release.
+It does not enable the server feature flag, publish a package, or make static
+credentials the default onboarding path.
+
 ## Unreleased customer usage errors
 
 Customer errors retain the required `error` code. Optional `message`, `retryable`
