@@ -575,6 +575,46 @@ paths:
           $ref: "#/components/responses/Error"
         default:
           $ref: "#/components/responses/Error"
+  "/v1/tenants/{tenantId}/provisioning-operation":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      operationId: getTenantProvisioningOperation
+      summary: Find a tenant's provisioning operation
+      description: |
+        Read the latest tenant.provision operation for this tenant within the
+        authenticated organization. Use this after reloading or losing an apply
+        response, without creating another tenant. Both read scopes and access
+        to this tenant are required. No query selectors are accepted.
+        An adopted tenant without a creation operation, or an older server,
+        may return 404. This read never retries work or activates customer traffic.
+      tags: [Operations]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.accounts:read
+            - daykeeper.provisioning:read
+      responses:
+        "200":
+          description: Current durable creation operation, without changing its state.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
   "/v1/operations/{operationId}":
     parameters:
       - $ref: "#/components/parameters/OperationId"
@@ -801,6 +841,7 @@ components:
           scopes:
             daykeeper.accounts:read: Read organizations and tenants.
             daykeeper.accounts:write: Plan organization and tenant changes.
+            daykeeper.billing:read: Read organization-wide usage and billing status.
             daykeeper.flows:read: Read flow metadata and versions.
             daykeeper.flows:write: Create flows and immutable versions.
             daykeeper.flows:publish: Publish reviewed flow versions.

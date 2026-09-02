@@ -60,6 +60,45 @@ after(() => {
   if (directory) rmSync(directory, { recursive: true, force: true });
 });
 
+test("tenant operation discovery is a tenant-scoped non-cacheable read with no mutation fallback", () => {
+  assert.equal(
+    typeof contract.components.securitySchemes.daykeeperOAuth.flows
+      .clientCredentials.scopes["daykeeper.billing:read"],
+    "string",
+  );
+  const route = contract.paths["/v1/tenants/{tenantId}/provisioning-operation"];
+  assert.deepEqual(Object.keys(route).sort(), ["get", "parameters"]);
+  assert.deepEqual(route.parameters, [
+    { $ref: "#/components/parameters/TenantId" },
+  ]);
+  assert.equal(route.get.operationId, "getTenantProvisioningOperation");
+  assert.deepEqual(route.get.security, [
+    {
+      daykeeperOAuth: [
+        "daykeeper.accounts:read",
+        "daykeeper.provisioning:read",
+      ],
+    },
+  ]);
+  assert.equal(route.get.parameters, undefined);
+  assert.equal(route.get.requestBody, undefined);
+  assert.equal(
+    route.get.responses["200"].headers["Cache-Control"].schema.const,
+    "no-store",
+  );
+  assert.equal(
+    route.get.responses["200"].content["application/json"].schema.$ref,
+    "#/components/schemas/OperationResponse",
+  );
+  for (const status of ["400", "401", "403", "404"])
+    assert.equal(
+      route.get.responses[status].$ref,
+      "#/components/responses/Error",
+    );
+  assert.match(route.get.description, /never retries work/);
+  assert.match(route.get.description, /older server/);
+});
+
 test("website preparation extends tenant plan/apply without changing existing operation kinds", () => {
   const schemas = contract.components.schemas;
   assert.equal(

@@ -72,6 +72,18 @@ implemented. This contract does not add activation, credential export, signup,
 payments or a shipped free tier. It is additive source for a future coordinated
 minor release, not a package publication or deployment approval.
 
+## Unreleased provisioning recovery
+
+`GET /v1/tenants/{tenantId}/provisioning-operation` rediscovers the latest
+`tenant.provision` operation after a reload or lost apply response. It requires
+both `daykeeper.accounts:read` and `daykeeper.provisioning:read`, checks tenant
+access, rejects query selectors, and returns the existing non-cacheable
+operation envelope. It does not retry, provision, or activate anything.
+
+A tenant adopted without a creation operation, or an older server, may return 404. Inspect the tenant and reconcile the original request; never interpret a
+missing operation as permission to create another tenant. This additive endpoint
+is unreleased and requires coordinated server and SDK approval.
+
 ## Unreleased customer usage errors
 
 Customer errors retain the required `error` code. Optional `message`, `retryable`
