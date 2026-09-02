@@ -20,6 +20,8 @@ servers:
 tags:
   - name: Capabilities
     description: Runtime feature and schema discovery.
+  - name: Entitlements
+    description: Current-organization admission policy and enforced-resource discovery.
   - name: Tenants
     description: Tenant planning, provisioning, and observed state.
   - name: Customer sessions
@@ -53,6 +55,96 @@ paths:
           $ref: "#/components/responses/Error"
         default:
           $ref: "#/components/responses/Error"
+  /v1/entitlements:
+    get:
+      operationId: getEntitlements
+      summary: Inspect the current organization's entitlements
+      description: |
+        Requires a verified Daykeeper access token with daykeeper.accounts:read.
+        The organization comes only from the authenticated principal; there is
+        no organization selector. A tenant-bound principal with this scope also
+        receives organization-wide tenant occupancy, not a tenant-local count.
+
+        Unconfigured, revoked, and exhausted assignments are successful status
+        reads, not HTTP policy errors. This read neither assigns an entitlement
+        nor reserves capacity. The one-tenant free-2026-08-31 policy is a
+        provisional provisioning safeguard, not approved marketing pricing or
+        general free-tier activation. Conversation and storage metering are
+        explicitly not enforced.
+      tags: [Entitlements]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.accounts:read
+      responses:
+        "200":
+          description: The authenticated organization's current admission status.
+          headers:
+            Cache-Control:
+              description: Entitlement status must not be cached.
+              schema:
+                type: string
+                const: no-store
+            X-Request-Id:
+              description: Correlation identifier shared with support and audit logs.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntitlementStatusResponse"
+              examples:
+                available:
+                  summary: Provisional policy with capacity for one new tenant
+                  value:
+                    data:
+                      organizationId: 10000000-0000-4000-8000-000000000001
+                      state: active
+                      assignmentVersion: 1
+                      policy:
+                        version: free-2026-08-31
+                        plan: free
+                        provisional: true
+                        tenantLimit: 1
+                      tenantProvisioning:
+                        enforced: true
+                        allowed: true
+                        used: 0
+                        limit: 1
+                        remaining: 1
+                        denial: null
+                      metering:
+                        conversations: not_enforced
+                        storage: not_enforced
+                unconfigured:
+                  summary: No assignment; reading status does not activate a plan
+                  value:
+                    data:
+                      organizationId: 10000000-0000-4000-8000-000000000001
+                      state: unconfigured
+                      assignmentVersion: null
+                      policy: null
+                      tenantProvisioning:
+                        enforced: true
+                        allowed: false
+                        used: 0
+                        limit: null
+                        remaining: null
+                        denial:
+                          code: ENTITLEMENT_REQUIRED
+                          retryable: false
+                          nextActions:
+                            - inspect_entitlements
+                            - contact_organization_owner
+                      metering:
+                        conversations: not_enforced
+                        storage: not_enforced
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+          description: The access token lacks daykeeper.accounts:read (SCOPE_REQUIRED).
+        default:
+          $ref: "#/components/responses/Error"
   /v1/tenant-plans:
     post:
       operationId: planTenant
@@ -82,7 +174,14 @@ paths:
     post:
       operationId: applyTenantPlan
       summary: Apply a tenant creation plan
-      description: Returns the original result when the same idempotency key is replayed.
+      description: |
+        Returns the original result when the same idempotency key is replayed.
+        New tenant admission requires an active organization entitlement with
+        available tenant capacity. Planning alone reserves no capacity; apply
+        checks admission atomically. Every persisted tenant state counts,
+        including degraded, suspended, and deleting tenants. Failed provider
+        work does not free its reservation. Accepted apply replays bypass a
+        new entitlement decision; existing plan-expiry rules still apply.
       tags: [Tenants]
       security:
         - daykeeperOAuth:
@@ -110,6 +209,57 @@ paths:
                 $ref: "#/components/schemas/ApplyTenantResponse"
         "401":
           $ref: "#/components/responses/Error"
+        "403":
+          description: |
+            The caller lacks the required scope, or the organization has no
+            assigned entitlement (ENTITLEMENT_REQUIRED) or a revoked assignment
+            (ENTITLEMENT_INACTIVE). Entitlement denials are not retryable until
+            the organization's assignment changes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                entitlementRequired:
+                  value:
+                    error:
+                      code: ENTITLEMENT_REQUIRED
+                      message: The organization needs an assigned entitlement before provisioning
+                      retryable: false
+                      nextActions:
+                        - inspect_entitlements
+                        - contact_organization_owner
+                      correlationId: 10000000-0000-4000-8000-000000000002
+                entitlementInactive:
+                  value:
+                    error:
+                      code: ENTITLEMENT_INACTIVE
+                      message: The organization entitlement is not active for provisioning
+                      retryable: false
+                      nextActions:
+                        - inspect_entitlements
+                        - contact_organization_owner
+                      correlationId: 10000000-0000-4000-8000-000000000002
+        "409":
+          description: |
+            A provisioning conflict, including an exhausted tenant allowance
+            (TENANT_QUOTA_EXCEEDED). Quota denials are not retryable without a
+            capacity or assignment change; existing conflict codes still apply.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                tenantQuotaExceeded:
+                  value:
+                    error:
+                      code: TENANT_QUOTA_EXCEEDED
+                      message: The organization has reached its tenant provisioning allowance
+                      retryable: false
+                      nextActions:
+                        - inspect_entitlements
+                        - contact_organization_owner
+                      correlationId: 10000000-0000-4000-8000-000000000002
         default:
           $ref: "#/components/responses/Error"
   /v1/tenants:
@@ -558,7 +708,8 @@ components:
   schemas:
     Capabilities:
       type: object
-      additionalProperties: false
+      # Response envelope: open so older clients tolerate new fields.
+      additionalProperties: true
       required: [apiVersion, emailChannels, customerSessions, flows]
       properties:
         apiVersion:
@@ -589,9 +740,136 @@ components:
             execution:
               type: string
               const: management_only
-    TenantSpec:
+    EntitlementPolicy:
       type: object
       additionalProperties: false
+      description: |
+        Immutable, versioned internal admission policy. The current
+        free-2026-08-31 policy permits one persisted tenant per organization.
+        That allowance is provisional, not approved pricing or a promise of
+        message, storage, channel, signup, or billing capabilities. Read the
+        returned tenantLimit rather than hardcoding the current example value.
+      required: [version, plan, provisional, tenantLimit]
+      properties:
+        version:
+          type: string
+          description: Immutable policy version; distinct from assignmentVersion.
+          examples: [free-2026-08-31]
+        plan:
+          type: string
+          const: free
+        provisional:
+          type: boolean
+          const: true
+        tenantLimit:
+          type: integer
+          minimum: 1
+          examples: [1]
+    TenantAdmissionDenialCode:
+      type: string
+      description: |
+        Stable tenant-admission denial code. ENTITLEMENT_REQUIRED means no
+        assignment; ENTITLEMENT_INACTIVE means the assignment is revoked;
+        TENANT_QUOTA_EXCEEDED means persisted tenant occupancy meets or exceeds
+        the assigned limit. New codes may be added; an unknown denial must not
+        be treated as permission to provision.
+      enum:
+        - ENTITLEMENT_REQUIRED
+        - ENTITLEMENT_INACTIVE
+        - TENANT_QUOTA_EXCEEDED
+    TenantAdmissionDenial:
+      type: object
+      additionalProperties: false
+      required: [code, retryable, nextActions]
+      properties:
+        code:
+          $ref: "#/components/schemas/TenantAdmissionDenialCode"
+        retryable:
+          type: boolean
+          const: false
+        nextActions:
+          type: array
+          description: |
+            Suggested recovery actions. Current policy denials return
+            inspect_entitlements and contact_organization_owner.
+          items:
+            type: string
+          examples:
+            - [inspect_entitlements, contact_organization_owner]
+    TenantProvisioningEntitlement:
+      type: object
+      additionalProperties: false
+      required: [enforced, allowed, used, limit, remaining, denial]
+      properties:
+        enforced:
+          type: boolean
+          const: true
+        allowed:
+          type: boolean
+          description: Whether a new tenant can currently be admitted; not a reservation.
+        used:
+          type: integer
+          minimum: 0
+          description: Organization-wide persisted tenant count, regardless of tenant state.
+        limit:
+          type: [integer, "null"]
+          minimum: 1
+          description: Assigned tenant limit, or null when no entitlement is assigned.
+        remaining:
+          type: [integer, "null"]
+          minimum: 0
+          description: |
+            max(0, limit - used), or null without an assignment. Remaining
+            capacity alone does not authorize provisioning of a revoked plan.
+        denial:
+          description: Null only when admission is currently allowed.
+          anyOf:
+            - $ref: "#/components/schemas/TenantAdmissionDenial"
+            - type: "null"
+    EntitlementStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - organizationId
+        - state
+        - assignmentVersion
+        - policy
+        - tenantProvisioning
+        - metering
+      properties:
+        organizationId:
+          type: string
+          format: uuid
+          description: Organization derived from the authenticated principal.
+        state:
+          type: string
+          enum: [unconfigured, active, revoked]
+        assignmentVersion:
+          type: [integer, "null"]
+          minimum: 1
+          description: Monotonic assignment version, or null without an assignment.
+        policy:
+          anyOf:
+            - $ref: "#/components/schemas/EntitlementPolicy"
+            - type: "null"
+        tenantProvisioning:
+          $ref: "#/components/schemas/TenantProvisioningEntitlement"
+        metering:
+          type: object
+          additionalProperties: false
+          description: These resource limits are not enforced by this implementation.
+          required: [conversations, storage]
+          properties:
+            conversations:
+              type: string
+              const: not_enforced
+            storage:
+              type: string
+              const: not_enforced
+    TenantSpec:
+      type: object
+      # Returned inside Tenant and TenantPlan, so it stays open for older clients.
+      additionalProperties: true
       required: [name, slug, locale, administrator]
       properties:
         name:
@@ -1338,7 +1616,8 @@ components:
         - daykeeper.customers:delete
     ErrorDetail:
       type: object
-      additionalProperties: false
+      # Response envelope: open so older clients tolerate new fields.
+      additionalProperties: true
       required: [code, message, retryable, nextActions, correlationId]
       properties:
         code:
@@ -1371,6 +1650,13 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/Capabilities"
+    EntitlementStatusResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/EntitlementStatus"
     TenantPlanResponse:
       allOf:
         - $ref: "#/components/schemas/SuccessEnvelope"
