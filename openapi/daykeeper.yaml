@@ -843,10 +843,28 @@ paths:
     post:
       operationId: createFlow
       summary: Create a flow and its first immutable version
+      description: |
+        Requires an Idempotency-Key header. The first application creates the
+        draft flow and its first immutable version and answers 201 with
+        `replayed: false`. Sending the same key with the exact same body again
+        answers 200 with the original flow and version and `replayed: true`; no
+        second flow is created, even after the flow has since changed.
+
+        Sending the same key with a different body is rejected with
+        IDEMPOTENCY_KEY_REUSED (409) and no write is applied. A slug already in
+        use by another flow is still rejected with RESOURCE_CONFLICT (409).
+
+        When a request fails without a usable response its outcome is unknown.
+        Repeat it with the same key and the exact original body to learn what
+        happened; do not retry an uncertain mutation under a new key. The Node
+        SDK surfaces this state as `outcomeUnknown` on the raised error and will
+        not retry it automatically.
       tags: [Flows]
       security:
         - daykeeperOAuth:
             - daykeeper.flows:write
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -854,14 +872,25 @@ paths:
             schema:
               $ref: "#/components/schemas/CreateFlowInput"
       responses:
-        "201":
-          description: Draft flow and immutable version one.
+        "200":
+          description: The exact original request was replayed; replayed is true.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FlowWithVersionResponse"
+                $ref: "#/components/schemas/FlowMutationResultResponse"
+        "201":
+          description: Draft flow and immutable version one; replayed is false.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowMutationResultResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+          description: The Idempotency-Key header is missing or malformed (INVALID_INPUT).
         "401":
           $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/IdempotencyKeyReused"
         default:
           $ref: "#/components/responses/Error"
   /v1/flows:
@@ -917,10 +946,28 @@ paths:
     post:
       operationId: createFlowVersion
       summary: Create the next immutable flow version
+      description: |
+        Requires an Idempotency-Key header. The first application creates the
+        next immutable version and answers 201 with `replayed: false`. Sending
+        the same key with the exact same body again answers 200 with the
+        original version and `replayed: true`; no second version is created.
+
+        Sending the same key with a different body is rejected with
+        IDEMPOTENCY_KEY_REUSED (409) and no write is applied. Optimistic
+        concurrency still applies to every new key: a stale
+        `expectedLatestVersion` is rejected with RESOURCE_VERSION_CONFLICT (409).
+
+        When a request fails without a usable response its outcome is unknown.
+        Repeat it with the same key and the exact original body to learn what
+        happened; do not retry an uncertain mutation under a new key. The Node
+        SDK surfaces this state as `outcomeUnknown` on the raised error and will
+        not retry it automatically.
       tags: [Flows]
       security:
         - daykeeperOAuth:
             - daykeeper.flows:write
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -928,14 +975,25 @@ paths:
             schema:
               $ref: "#/components/schemas/CreateFlowVersionInput"
       responses:
-        "201":
-          description: Flow and newly created version.
+        "200":
+          description: The exact original request was replayed; replayed is true.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FlowWithVersionResponse"
+                $ref: "#/components/schemas/FlowMutationResultResponse"
+        "201":
+          description: Flow and newly created version; replayed is false.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowMutationResultResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+          description: The Idempotency-Key header is missing or malformed (INVALID_INPUT).
         "401":
           $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/IdempotencyKeyReused"
         default:
           $ref: "#/components/responses/Error"
   "/v1/flows/{flowId}/versions/{version}":
@@ -971,10 +1029,29 @@ paths:
         Publishing records audited desired state. The current capability reports
         flow execution as management_only; this operation does not yet execute a
         flow against customer conversations.
+
+        Requires an Idempotency-Key header. This operation always answers 200:
+        the first application publishes the version and reports
+        `replayed: false`, and the same key with the exact same body answers
+        with the original result and `replayed: true` without publishing again.
+
+        Sending the same key with a different body is rejected with
+        IDEMPOTENCY_KEY_REUSED (409) and no write is applied. Optimistic
+        concurrency still applies to every new key: a stale
+        `expectedResourceVersion` is rejected with RESOURCE_VERSION_CONFLICT
+        (409).
+
+        When a request fails without a usable response its outcome is unknown.
+        Repeat it with the same key and the exact original body to learn what
+        happened; do not retry an uncertain mutation under a new key. The Node
+        SDK surfaces this state as `outcomeUnknown` on the raised error and will
+        not retry it automatically.
       tags: [Flows]
       security:
         - daykeeperOAuth:
             - daykeeper.flows:publish
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -983,13 +1060,21 @@ paths:
               $ref: "#/components/schemas/PublishFlowVersionInput"
       responses:
         "200":
-          description: Flow with the selected published version.
+          description: |
+            Flow with the selected published version. replayed is true when the
+            same key already published this exact request, and false when this
+            request performed the publication.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FlowWithVersionResponse"
+                $ref: "#/components/schemas/FlowMutationResultResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+          description: The Idempotency-Key header is missing or malformed (INVALID_INPUT).
         "401":
           $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/IdempotencyKeyReused"
         default:
           $ref: "#/components/responses/Error"
 components:
@@ -1019,12 +1104,20 @@ components:
       name: Idempotency-Key
       in: header
       required: true
-      description: A caller-generated key reused only for an exact logical mutation.
+      description: |
+        A caller-generated key reused only for an exact logical mutation. The
+        key is bound to the request the first time it is applied. Repeating that
+        exact request with the same key returns the stored original result
+        instead of writing again, and the operation reports the repeat as a
+        replay. Reusing the key for a different request is rejected and no write
+        is applied. A missing or malformed key is rejected with INVALID_INPUT
+        (400). Use the same key to reconcile a request whose outcome is unknown;
+        do not retry an uncertain mutation under a new key.
       schema:
         type: string
         minLength: 16
         maxLength: 128
-        pattern: "^[A-Za-z0-9._:-]+$"
+        pattern: "^[A-Za-z0-9._:-]{16,128}$"
     TenantId:
       name: tenantId
       in: path
@@ -1061,6 +1154,27 @@ components:
         type: string
         format: uuid
   responses:
+    IdempotencyKeyReused:
+      description: |
+        The idempotency key is already bound to a different request, or the
+        mutation conflicts with current state. IDEMPOTENCY_KEY_REUSED is never
+        retryable under the same key and no write was applied; resend the exact
+        original request under that key, or start a new mutation under a new
+        key. Existing flow conflict codes still apply.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            idempotencyKeyReused:
+              value:
+                error:
+                  code: IDEMPOTENCY_KEY_REUSED
+                  message: The idempotency key is already bound to another request
+                  retryable: false
+                  nextActions:
+                    - use_new_idempotency_key
+                  correlationId: 10000000-0000-4000-8000-000000000002
     Error:
       description: Structured Daykeeper error. Resource denials do not disclose cross-tenant existence.
       headers:
@@ -2159,6 +2273,21 @@ components:
           $ref: "#/components/schemas/Flow"
         version:
           $ref: "#/components/schemas/FlowVersion"
+    FlowMutationResult:
+      type: object
+      # Response envelope: open so older clients tolerate new fields.
+      additionalProperties: true
+      required: [flow, version, replayed]
+      properties:
+        flow:
+          $ref: "#/components/schemas/Flow"
+        version:
+          $ref: "#/components/schemas/FlowVersion"
+        replayed:
+          type: boolean
+          description: |
+            True when the stored result of an earlier identical request under
+            the same idempotency key was returned and no write was applied.
     CreateFlowInput:
       type: object
       additionalProperties: false
@@ -2495,6 +2624,13 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/FlowWithVersion"
+    FlowMutationResultResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/FlowMutationResult"
     FlowVersionResponse:
       allOf:
         - $ref: "#/components/schemas/SuccessEnvelope"

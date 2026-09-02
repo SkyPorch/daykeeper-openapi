@@ -118,6 +118,28 @@ These are opt-in implementation contracts, not automatic customer activation,
 billing approval, or a release. The customer schema change is additive source
 for the next coordinated minor release; no tag is created here.
 
+## Unreleased idempotent flow mutations
+
+Creating a flow, adding a version, and publishing a version each require an
+`Idempotency-Key` header of 16 to 128 URL-safe characters. The key is bound to
+the request the first time it is applied. Creation and revision answer `201`
+with `replayed: false` on first application and `200` with the original result
+and `replayed: true` on an exact repeat. Publication always answers `200` and
+reports the same `replayed` signal. Reusing a key for a different request is
+rejected with `IDEMPOTENCY_KEY_REUSED` (409) and applies no write; a missing or
+malformed key is rejected with `INVALID_INPUT` (400).
+
+Optimistic concurrency is unchanged for new keys, so a stale
+`expectedLatestVersion` or `expectedResourceVersion` still returns
+`RESOURCE_VERSION_CONFLICT`. When a mutation fails without a usable response its
+outcome is unknown: repeat it with the same key and the exact original body to
+reconcile it, and never retry an uncertain mutation under a new key. The Node
+SDK reports that state as `outcomeUnknown` and does not retry it automatically.
+
+This is not an additive change. It requires input a conforming client did not
+previously send and changes the success status of two operations, so it needs a
+coordinated server and SDK release rather than a routine minor bump.
+
 ## Check and bundle
 
 ```sh
