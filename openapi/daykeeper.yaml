@@ -1077,6 +1077,153 @@ paths:
           $ref: "#/components/responses/IdempotencyKeyReused"
         default:
           $ref: "#/components/responses/Error"
+  /v1/machine-enrollments/challenges:
+    post:
+      operationId: createMachineEnrollmentChallenge
+      summary: Create a signed machine enrollment challenge
+      description: |
+        Creates a short-lived challenge for a machine workspace enrollment.
+        This endpoint uses signed body proofs and deliberately accepts neither
+        bearer authorization nor browser credentials.
+      tags: [Agent credentials]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MachineEnrollmentInput"
+      responses:
+        "201":
+          description: A newly created enrollment challenge.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MachineChallenge"
+        "400":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/machine-enrollments:
+    post:
+      operationId: enrollMachineWorkspace
+      summary: Enroll a machine workspace with a signed proof
+      tags: [Agent credentials]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MachineProofInput"
+      responses:
+        "201":
+          description: A workspace was newly allocated and a credential issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MachineEnrollmentResult"
+        "200":
+          description: The original enrollment result was replayed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MachineEnrollmentResult"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/machine-credential-rotations/challenges:
+    post:
+      operationId: createMachineCredentialRotationChallenge
+      summary: Create a signed machine credential rotation challenge
+      tags: [Agent credentials]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MachineRotationInput"
+      responses:
+        "201":
+          description: A newly created credential rotation challenge.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MachineChallenge"
+        "400":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/machine-credential-rotations:
+    post:
+      operationId: rotateMachineCredential
+      summary: Rotate a machine credential with a signed proof
+      tags: [Agent credentials]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MachineProofInput"
+      responses:
+        "201":
+          description: A new machine credential was issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MachineRotationResult"
+        "200":
+          description: The original rotation result was replayed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MachineRotationResult"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/machine-credential-rotations/current:
+    post:
+      operationId: inspectMachineCredential
+      summary: Inspect the current machine credential with a signed proof
+      tags: [Agent credentials]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MachineProofInput"
+      responses:
+        "200":
+          description: Current machine credential metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MachineCredentialMetadata"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
 components:
   securitySchemes:
     daykeeperOAuth:
@@ -2326,6 +2473,218 @@ components:
         expectedResourceVersion:
           type: integer
           minimum: 1
+    MachinePublicKey:
+      type: object
+      additionalProperties: false
+      required: [kty, crv, x, y]
+      properties:
+        kty:
+          type: string
+          const: EC
+        crv:
+          type: string
+          const: P-256
+        x:
+          type: string
+          minLength: 43
+          maxLength: 43
+          pattern: "^[A-Za-z0-9_-]{43}$"
+        y:
+          type: string
+          minLength: 43
+          maxLength: 43
+          pattern: "^[A-Za-z0-9_-]{43}$"
+    MachineEnrollmentInput:
+      type: object
+      additionalProperties: false
+      required: [name, idempotencyKey, publicKey]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 120
+        idempotencyKey:
+          type: string
+          minLength: 16
+          maxLength: 128
+          pattern: "^[A-Za-z0-9._:-]{16,128}$"
+        publicKey:
+          $ref: "#/components/schemas/MachinePublicKey"
+    MachineChallenge:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          challengeId,
+          audience,
+          nonce,
+          keyThumbprint,
+          requestHash,
+          createdAt,
+          expiresAt,
+        ]
+      properties:
+        challengeId:
+          type: string
+          format: uuid
+        audience:
+          type: string
+          format: uri
+        nonce:
+          type: string
+          minLength: 43
+          maxLength: 43
+          pattern: "^[A-Za-z0-9_-]{43}$"
+        keyThumbprint:
+          type: string
+          minLength: 43
+          maxLength: 43
+          pattern: "^[A-Za-z0-9_-]{43}$"
+        requestHash:
+          type: string
+          minLength: 64
+          maxLength: 64
+          pattern: "^[0-9a-f]{64}$"
+        createdAt:
+          type: integer
+          minimum: 0
+        expiresAt:
+          type: integer
+          minimum: 0
+    MachineProofInput:
+      type: object
+      additionalProperties: false
+      required: [challengeId, proof]
+      properties:
+        challengeId:
+          type: string
+          format: uuid
+        proof:
+          type: string
+          minLength: 1
+          maxLength: 4096
+    MachineEnrollmentResult:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          ownerId,
+          organizationId,
+          organizationSlug,
+          credentialIssued,
+          credential,
+          replayed,
+          token,
+        ]
+      properties:
+        ownerId:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        organizationSlug:
+          type: string
+        credentialIssued:
+          type: boolean
+        credential:
+          type: object
+          additionalProperties: false
+          required: [id, expiresAt, revokedAt, policyVersion]
+          properties:
+            id:
+              type: string
+              format: uuid
+            expiresAt:
+              type: string
+              format: date-time
+            revokedAt:
+              type: [string, "null"]
+              format: date-time
+            policyVersion:
+              type: string
+              const: machine-onboarding-v1
+        replayed:
+          type: boolean
+        token:
+          type: [string, "null"]
+          pattern: "^dk_machine_[0-9a-f]{32}_[A-Za-z0-9_-]{43}$"
+    MachineRotationInput:
+      type: object
+      additionalProperties: false
+      required: [ownerId, expectedCredentialId, intentId]
+      properties:
+        ownerId:
+          type: string
+          format: uuid
+        expectedCredentialId:
+          type: string
+          format: uuid
+        intentId:
+          type: string
+          format: uuid
+    MachineRotationResult:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          ownerId,
+          organizationId,
+          credentialId,
+          predecessorId,
+          intentId,
+          expiresAt,
+          revokedAt,
+          replayed,
+          token,
+        ]
+      properties:
+        ownerId:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        credentialId:
+          type: string
+          format: uuid
+        predecessorId:
+          type: string
+          format: uuid
+        intentId:
+          type: string
+          format: uuid
+        expiresAt:
+          type: string
+          format: date-time
+        revokedAt:
+          type: [string, "null"]
+          format: date-time
+        replayed:
+          type: boolean
+        token:
+          type: [string, "null"]
+          pattern: "^dk_machine_[0-9a-f]{32}_[A-Za-z0-9_-]{43}$"
+    MachineCredentialMetadata:
+      type: object
+      additionalProperties: false
+      required: [ownerId, organizationId, credentialId, expiresAt, revokedAt]
+      properties:
+        ownerId:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        credentialId:
+          type: string
+          format: uuid
+        expiresAt:
+          type: string
+          format: date-time
+        revokedAt:
+          type: [string, "null"]
+          format: date-time
     AgentCredentialScope:
       type: string
       description: A scope that a human owner may delegate to a headless agent credential.
