@@ -46,7 +46,10 @@ test("domain verification operations are machine-owner scoped and non-cacheable"
     contract.paths[
       "/v1/tenants/{tenantId}/domain-verifications/{verificationId}"
     ];
-  const verify = item.post;
+  const verify =
+    contract.paths[
+      "/v1/tenants/{tenantId}/domain-verifications/{verificationId}/verify"
+    ].post;
   const revoke =
     contract.paths[
       "/v1/tenants/{tenantId}/domain-verifications/{verificationId}/revoke"

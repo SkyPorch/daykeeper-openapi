@@ -803,6 +803,10 @@ paths:
         "401": { $ref: "#/components/responses/DomainError" }
         "403": { $ref: "#/components/responses/DomainError" }
         "404": { $ref: "#/components/responses/DomainError" }
+  "/v1/tenants/{tenantId}/domain-verifications/{verificationId}/verify":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/DomainVerificationId"
     post:
       operationId: verifyDomainVerification
       summary: Verify a tenant domain through DNS
