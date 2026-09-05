@@ -88,6 +88,95 @@ test("agent credential routes are owner-managed, bounded, and reveal-once", () =
   }
 });
 
+test("machine onboarding uses five signed-body routes with raw status-specific results", () => {
+  const routes = [
+    [
+      "/v1/machine-enrollments/challenges",
+      "MachineEnrollmentInput",
+      { 201: "MachineChallenge" },
+    ],
+    [
+      "/v1/machine-enrollments",
+      "MachineProofInput",
+      { 200: "MachineEnrollmentResult", 201: "MachineEnrollmentResult" },
+    ],
+    [
+      "/v1/machine-credential-rotations/challenges",
+      "MachineRotationInput",
+      { 201: "MachineChallenge" },
+    ],
+    [
+      "/v1/machine-credential-rotations",
+      "MachineProofInput",
+      { 200: "MachineRotationResult", 201: "MachineRotationResult" },
+    ],
+    [
+      "/v1/machine-credential-rotations/current",
+      "MachineProofInput",
+      { 200: "MachineCredentialMetadata" },
+    ],
+  ];
+  for (const [path, input, results] of routes) {
+    const route = contract.paths[path].post;
+    assert.deepEqual(route.security, []);
+    assert.equal(route.requestBody.required, true);
+    assert.equal(
+      route.requestBody.content["application/json"].schema.$ref,
+      `#/components/schemas/${input}`,
+    );
+    assert.deepEqual(
+      Object.keys(route.responses)
+        .filter((status) => /^2/.test(status))
+        .sort(),
+      Object.keys(results).sort(),
+    );
+    for (const [status, schema] of Object.entries(results)) {
+      assert.equal(
+        route.responses[status].content["application/json"].schema.$ref,
+        `#/components/schemas/${schema}`,
+      );
+      assert.equal(
+        contract.components.schemas[schema].properties.data,
+        undefined,
+      );
+    }
+  }
+});
+
+test("machine key and proof inputs are bounded and metadata cannot expose secrets", () => {
+  const schemas = contract.components.schemas;
+  for (const name of [
+    "MachinePublicKey",
+    "MachineEnrollmentInput",
+    "MachineProofInput",
+    "MachineRotationInput",
+    "MachineCredentialMetadata",
+  ]) {
+    assert.equal(schemas[name].additionalProperties, false);
+  }
+  assert.deepEqual(schemas.MachinePublicKey.required.slice().sort(), [
+    "crv",
+    "kty",
+    "x",
+    "y",
+  ]);
+  assert.equal(schemas.MachinePublicKey.properties.d, undefined);
+  assert.equal(schemas.MachineProofInput.properties.proof.maxLength, 4096);
+  assert.equal(schemas.MachineCredentialMetadata.properties.token, undefined);
+  assert.equal(
+    schemas.MachineCredentialMetadata.properties.tokenHash,
+    undefined,
+  );
+  assert.deepEqual(schemas.MachineEnrollmentResult.properties.token.type, [
+    "string",
+    "null",
+  ]);
+  assert.deepEqual(schemas.MachineRotationResult.properties.token.type, [
+    "string",
+    "null",
+  ]);
+});
+
 test("agent credentials cannot delegate credential administration", () => {
   const schemas = contract.components.schemas;
   const delegated = schemas.AgentCredentialScope.enum;
