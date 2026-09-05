@@ -103,6 +103,17 @@ This contract is unreleased and requires a coordinated server and SDK release.
 It does not enable the server feature flag, publish a package, or make static
 credentials the default onboarding path.
 
+## Unreleased domain verification
+
+Machine-owner tokens can create, inspect, DNS-verify, and revoke durable
+domain-verification evidence through `/v1/tenants/{tenantId}/domain-verifications`.
+The create request requires an exact HTTPS origin and an `Idempotency-Key`;
+the response exposes only public TXT record instructions and lifecycle
+timestamps. Verification re-observes DNS and never activates customer traffic.
+Human and delegated tokens are not supported, and all success and error
+responses are non-cacheable. This additive contract is unreleased and does not
+authorize DNS changes, route admission, deployment, or package publication.
+
 ## Unreleased customer usage errors
 
 Customer errors retain the required `error` code. Optional `message`, `retryable`

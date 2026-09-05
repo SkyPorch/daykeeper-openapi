@@ -34,6 +34,8 @@ tags:
     description: Email-domain planning, DNS evidence, and round-trip readiness.
   - name: Website channels
     description: First-inbox preparation and observed installation readiness.
+  - name: Domain verification
+    description: DNS observation and durable domain-proof evidence; never traffic activation.
   - name: Operations
     description: Durable, inspectable provisioning work.
   - name: Flows
@@ -737,6 +739,151 @@ paths:
           $ref: "#/components/responses/Error"
         default:
           $ref: "#/components/responses/Error"
+  "/v1/tenants/{tenantId}/domain-verifications":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    post:
+      operationId: createDomainVerification
+      summary: Create or replay a tenant domain verification
+      description: |
+        Persists a DNS TXT observation challenge for the exact HTTPS origin.
+        This is durable verification evidence only; it never enables customer
+        traffic. Exact retries with the same Idempotency-Key return the
+        original challenge and DNS value without generating a new nonce.
+        Machine-owner principals are required; human and delegated tokens are
+        not supported. All responses, including errors, are not cacheable.
+      tags: [Domain verification]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:write]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DomainVerificationInput"
+      responses:
+        "201":
+          description: A new or exact-replayed domain verification challenge.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DomainVerificationResponse"
+        "400": { $ref: "#/components/responses/DomainError" }
+        "413": { $ref: "#/components/responses/DomainRequestError" }
+        "415": { $ref: "#/components/responses/DomainRequestError" }
+        "401": { $ref: "#/components/responses/DomainError" }
+        "403": { $ref: "#/components/responses/DomainError" }
+        "404": { $ref: "#/components/responses/DomainError" }
+        "409": { $ref: "#/components/responses/DomainError" }
+        "429": { $ref: "#/components/responses/DomainRateLimited" }
+        "503": { $ref: "#/components/responses/DomainError" }
+  "/v1/tenants/{tenantId}/domain-verifications/{verificationId}":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/DomainVerificationId"
+    get:
+      operationId: getDomainVerification
+      summary: Read a tenant domain verification
+      description: Read durable DNS evidence without activating traffic. Requires an opaque machine-owner credential; human and delegated tokens are unsupported.
+      tags: [Domain verification]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:read]
+      responses:
+        "200":
+          description: Domain verification evidence.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DomainVerificationResponse"
+        "400": { $ref: "#/components/responses/DomainError" }
+        "401": { $ref: "#/components/responses/DomainError" }
+        "403": { $ref: "#/components/responses/DomainError" }
+        "404": { $ref: "#/components/responses/DomainError" }
+        "429": { $ref: "#/components/responses/DomainRateLimited" }
+        "503": { $ref: "#/components/responses/DomainError" }
+  "/v1/tenants/{tenantId}/domain-verifications/{verificationId}/verify":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/DomainVerificationId"
+    post:
+      operationId: verifyDomainVerification
+      summary: Verify a tenant domain through DNS
+      description: |
+        Re-observes the public TXT record and commits a short-lived proof
+        receipt. Verification does not activate customer traffic. Machine-owner
+        principals are required and all responses are not cacheable.
+      tags: [Domain verification]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmptyObject"
+      responses:
+        "200":
+          description: Updated or already verified domain evidence.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DomainVerificationResponse"
+        "400": { $ref: "#/components/responses/DomainError" }
+        "413": { $ref: "#/components/responses/DomainRequestError" }
+        "415": { $ref: "#/components/responses/DomainRequestError" }
+        "401": { $ref: "#/components/responses/DomainError" }
+        "403": { $ref: "#/components/responses/DomainError" }
+        "404": { $ref: "#/components/responses/DomainError" }
+        "409": { $ref: "#/components/responses/DomainError" }
+        "429": { $ref: "#/components/responses/DomainRateLimited" }
+        "503": { $ref: "#/components/responses/DomainError" }
+  "/v1/tenants/{tenantId}/domain-verifications/{verificationId}/revoke":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/DomainVerificationId"
+    post:
+      operationId: revokeDomainVerification
+      summary: Revoke a tenant domain verification
+      description: Revoke durable evidence without changing traffic activation. Requires an opaque machine-owner credential; human and delegated tokens are unsupported.
+      tags: [Domain verification]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmptyObject"
+      responses:
+        "200":
+          description: Revoked domain evidence.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DomainVerificationResponse"
+        "401": { $ref: "#/components/responses/DomainError" }
+        "403": { $ref: "#/components/responses/DomainError" }
+        "404": { $ref: "#/components/responses/DomainError" }
+        "400": { $ref: "#/components/responses/DomainError" }
+        "409": { $ref: "#/components/responses/DomainError" }
+        "413": { $ref: "#/components/responses/DomainRequestError" }
+        "415": { $ref: "#/components/responses/DomainRequestError" }
+        "429": { $ref: "#/components/responses/DomainRateLimited" }
+        "503": { $ref: "#/components/responses/DomainError" }
   "/v1/tenants/{tenantId}/provisioning-operation":
     parameters:
       - $ref: "#/components/parameters/TenantId"
@@ -1300,6 +1447,13 @@ components:
       schema:
         type: string
         format: uuid
+    DomainVerificationId:
+      name: verificationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
   responses:
     IdempotencyKeyReused:
       description: |
@@ -1334,6 +1488,43 @@ components:
           schema:
             type: integer
             minimum: 0
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    DomainError:
+      description: Domain verification error; never cache this response.
+      headers:
+        Cache-Control:
+          schema: { type: string, const: no-store }
+        X-Request-Id:
+          schema: { type: string }
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    DomainRequestError:
+      description: Domain verification request rejected; never cache this response.
+      headers:
+        Cache-Control:
+          schema: { type: string, const: no-store }
+        X-Request-Id:
+          schema: { type: string }
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    DomainRateLimited:
+      description: Domain verification request rate limited; retry only as directed.
+      headers:
+        Cache-Control:
+          schema: { type: string, const: no-store }
+        Retry-After:
+          schema:
+            type: integer
+            minimum: 0
+        X-Request-Id:
+          schema: { type: string }
       content:
         application/json:
           schema:
@@ -1373,6 +1564,20 @@ components:
           properties:
             enabled:
               type: boolean
+        domainVerifications:
+          type: object
+          additionalProperties: false
+          description: Optional on older servers. DNS evidence does not activate traffic.
+          required: [enabled, authentication, trafficActivation]
+          properties:
+            enabled:
+              type: boolean
+            authentication:
+              type: string
+              const: machine_owner
+            trafficActivation:
+              type: boolean
+              const: false
         usage:
           type: object
           additionalProperties: false
@@ -1650,6 +1855,77 @@ components:
           items:
             type: string
           description: Recovery hints for people and agents; never automatic authority to mutate policy.
+    DomainVerificationInput:
+      type: object
+      additionalProperties: false
+      required: [origin]
+      properties:
+        origin:
+          type: string
+          maxLength: 2048
+          pattern: '^https://[^/?#@\s\\*;,]+$'
+          description: Exact canonical HTTPS origin; no path, query, fragment, wildcard, credentials, or IP literal.
+    EmptyObject:
+      type: object
+      additionalProperties: false
+    DomainVerificationDns:
+      type: object
+      additionalProperties: false
+      required: [type, name, value]
+      properties:
+        type:
+          type: string
+          const: TXT
+        name:
+          type: string
+          minLength: 1
+          maxLength: 253
+        value:
+          type: string
+          minLength: 1
+          maxLength: 4096
+    DomainVerification:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          challengeId,
+          tenantId,
+          origin,
+          state,
+          dns,
+          expiresAt,
+          verifiedAt,
+          revokedAt,
+        ]
+      properties:
+        challengeId:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        origin:
+          type: string
+          maxLength: 2048
+          pattern: '^https://[^/?#@\s\\*;,]+$'
+        state:
+          type: string
+          enum: [pending, verified, expired, revoked]
+        dns:
+          $ref: "#/components/schemas/DomainVerificationDns"
+        expiresAt:
+          type: integer
+          format: int64
+          minimum: 0
+        verifiedAt:
+          type: [integer, "null"]
+          format: int64
+          minimum: 0
+        revokedAt:
+          type: [integer, "null"]
+          format: int64
+          minimum: 0
     TenantSpec:
       type: object
       # Returned inside Tenant and TenantPlan, so it stays open for older clients.
@@ -2940,6 +3216,13 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/WebsiteChannel"
+    DomainVerificationResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/DomainVerification"
     EmailChannelPlanResponse:
       allOf:
         - $ref: "#/components/schemas/SuccessEnvelope"
