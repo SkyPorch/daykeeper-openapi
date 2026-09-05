@@ -701,6 +701,7 @@ paths:
         enabled: routing, identity checks, usage enforcement and installation
         verification must all pass before activation. This read never activates
         a channel, returns provider credentials, or creates another inbox.
+        API-only inboxes are served by /inbox and return 404 here.
       tags: [Website channels]
       security:
         - daykeeperOAuth: [daykeeper.accounts:read]
@@ -739,6 +740,29 @@ paths:
           $ref: "#/components/responses/Error"
         default:
           $ref: "#/components/responses/Error"
+  "/v1/tenants/{tenantId}/inbox":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      operationId: getInbox
+      summary: Inspect the tenant's inbox
+      description: Public inbox metadata without provider secrets. Preparation does not enable traffic; activation requires a separate boundary.
+      tags: [Website channels]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:read]
+      responses:
+        "200":
+          description: Public inbox metadata without provider secrets.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InboxChannelResponse"
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   "/v1/tenants/{tenantId}/domain-verifications":
     parameters:
       - $ref: "#/components/parameters/TenantId"
@@ -1557,6 +1581,17 @@ components:
             trafficActivation:
               type: boolean
               description: Whether self-serve traffic activation is implemented and enabled. Preparation alone is insufficient.
+        apiInboxes:
+          type: object
+          additionalProperties: false
+          description: API-only inbox preparation capability. Traffic activation is not supported.
+          required: [enabled, trafficActivation]
+          properties:
+            enabled:
+              type: boolean
+            trafficActivation:
+              type: boolean
+              const: false
         customerSessions:
           type: object
           additionalProperties: false
@@ -1955,6 +1990,8 @@ components:
           maxLength: 254
         website:
           $ref: "#/components/schemas/WebsiteInboxSpec"
+        inbox:
+          $ref: "#/components/schemas/ApiInboxSpec"
         administrator:
           description: Optional legacy contact metadata; it does not establish ownership or access.
           type: object
@@ -1969,6 +2006,11 @@ components:
               type: string
               format: email
               maxLength: 254
+      not:
+        properties:
+          website: {}
+          inbox: {}
+        required: [website, inbox]
     WebsiteInboxSpec:
       type: object
       additionalProperties: false
@@ -1997,6 +2039,14 @@ components:
             format: uri
             maxLength: 2048
             pattern: '^https://[^/?#@\s\\*;,]+/?$'
+    ApiInboxSpec:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          type: string
+          const: api
     WebsiteChannel:
       type: object
       additionalProperties: false
@@ -2040,6 +2090,38 @@ components:
         updatedAt:
           type: string
           format: date-time
+    InboxChannel:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          organizationId,
+          tenantId,
+          spec,
+          state,
+          trafficEnabled,
+          version,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        spec:
+          oneOf:
+            - $ref: "#/components/schemas/WebsiteInboxSpec"
+            - $ref: "#/components/schemas/ApiInboxSpec"
+        state:
+          type: string
+          description: Extensible observed state; treat unknown states as not ready.
+        trafficEnabled:
+          type: boolean
+          description: False until the complete activation boundary is implemented and verified. A succeeded provisioning operation alone does not make this true.
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     Tenant:
       type: object
       additionalProperties: false
@@ -3216,6 +3298,13 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/WebsiteChannel"
+    InboxChannelResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/InboxChannel"
     DomainVerificationResponse:
       allOf:
         - $ref: "#/components/schemas/SuccessEnvelope"

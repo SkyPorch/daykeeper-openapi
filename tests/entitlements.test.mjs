@@ -141,6 +141,48 @@ test("website preparation extends tenant plan/apply without changing existing op
   ]);
 });
 
+test("API inbox preparation has an exact spec, separate read, and no traffic activation", () => {
+  const schemas = contract.components.schemas;
+  const apiSpec = schemas.ApiInboxSpec;
+  assert.equal(apiSpec.type, "object");
+  assert.equal(apiSpec.additionalProperties, false);
+  assert.deepEqual(apiSpec.required, ["type"]);
+  assert.equal(apiSpec.properties.type.const, "api");
+
+  assert.deepEqual(schemas.TenantSpec.not.required, ["website", "inbox"]);
+  assert.equal(
+    schemas.TenantSpec.properties.inbox.$ref,
+    "#/components/schemas/ApiInboxSpec",
+  );
+  assert.deepEqual(
+    schemas.InboxChannel.properties.spec.oneOf.map((schema) => schema.$ref),
+    [
+      "#/components/schemas/WebsiteInboxSpec",
+      "#/components/schemas/ApiInboxSpec",
+    ],
+  );
+  assert.equal(schemas.InboxChannel.properties.trafficEnabled.type, "boolean");
+
+  const capabilities = schemas.Capabilities.properties.apiInboxes;
+  assert.deepEqual(capabilities.required, ["enabled", "trafficActivation"]);
+  assert.equal(capabilities.properties.trafficActivation.const, false);
+
+  const route = contract.paths["/v1/tenants/{tenantId}/inbox"].get;
+  assert.equal(route.operationId, "getInbox");
+  assert.deepEqual(route.security, [
+    { daykeeperOAuth: ["daykeeper.accounts:read"] },
+  ]);
+  assert.equal(
+    route.responses["200"].headers["Cache-Control"].schema.const,
+    "no-store",
+  );
+  assert.equal(
+    route.responses["200"].content["application/json"].schema.$ref,
+    "#/components/schemas/InboxChannelResponse",
+  );
+  assert.equal(route.responses["404"].$ref, "#/components/responses/Error");
+});
+
 test("the OpenAPI validator accepts preparation-only status and legacy or opted-in tenant plans", () => {
   const document = structuredClone(contract);
   const request =
