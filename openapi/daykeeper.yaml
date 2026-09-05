@@ -803,10 +803,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DomainVerificationResponse"
+        "400": { $ref: "#/components/responses/DomainError" }
         "401": { $ref: "#/components/responses/DomainError" }
         "403": { $ref: "#/components/responses/DomainError" }
         "404": { $ref: "#/components/responses/DomainError" }
         "429": { $ref: "#/components/responses/DomainRateLimited" }
+        "503": { $ref: "#/components/responses/DomainError" }
   "/v1/tenants/{tenantId}/domain-verifications/{verificationId}/verify":
     parameters:
       - $ref: "#/components/parameters/TenantId"
@@ -876,9 +878,12 @@ paths:
         "401": { $ref: "#/components/responses/DomainError" }
         "403": { $ref: "#/components/responses/DomainError" }
         "404": { $ref: "#/components/responses/DomainError" }
+        "400": { $ref: "#/components/responses/DomainError" }
+        "409": { $ref: "#/components/responses/DomainError" }
         "413": { $ref: "#/components/responses/DomainRequestError" }
         "415": { $ref: "#/components/responses/DomainRequestError" }
         "429": { $ref: "#/components/responses/DomainRateLimited" }
+        "503": { $ref: "#/components/responses/DomainError" }
   "/v1/tenants/{tenantId}/provisioning-operation":
     parameters:
       - $ref: "#/components/parameters/TenantId"

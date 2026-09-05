@@ -72,6 +72,43 @@ test("domain verification operations are machine-owner scoped and non-cacheable"
         parameter.$ref === "#/components/parameters/IdempotencyKey",
     ),
   );
+  assert.deepEqual(Object.keys(create.responses).sort(), [
+    "201",
+    "400",
+    "401",
+    "403",
+    "404",
+    "409",
+    "413",
+    "415",
+    "429",
+    "503",
+  ]);
+  assert.deepEqual(Object.keys(item.get.responses).sort(), [
+    "200",
+    "400",
+    "401",
+    "403",
+    "404",
+    "429",
+    "503",
+  ]);
+  for (const operation of [verify, revoke])
+    for (const status of [
+      "400",
+      "401",
+      "403",
+      "404",
+      "409",
+      "413",
+      "415",
+      "429",
+      "503",
+    ])
+      assert.ok(
+        operation.responses[status],
+        `${operation.operationId} ${status}`,
+      );
   for (const operation of [create, item.get, verify, revoke]) {
     for (const status of Object.keys(operation.responses)) {
       const responseDefinition = response(operation, status);
