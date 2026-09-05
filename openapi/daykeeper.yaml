@@ -1654,7 +1654,7 @@ components:
       type: object
       # Returned inside Tenant and TenantPlan, so it stays open for older clients.
       additionalProperties: true
-      required: [name, slug, locale, administrator]
+      required: [name, slug, locale]
       properties:
         name:
           type: string
@@ -1680,6 +1680,7 @@ components:
         website:
           $ref: "#/components/schemas/WebsiteInboxSpec"
         administrator:
+          description: Optional legacy contact metadata; it does not establish ownership or access.
           type: object
           additionalProperties: false
           required: [name, email]
