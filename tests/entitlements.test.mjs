@@ -172,6 +172,56 @@ test("the OpenAPI validator accepts preparation-only status and legacy or opted-
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 });
 
+test("TenantSpec allows machine-owned tenants without legacy administrator metadata", () => {
+  const document = structuredClone(contract);
+  const request =
+    document.paths["/v1/tenant-plans"].post.requestBody.content[
+      "application/json"
+    ];
+  request.examples = {
+    machineOwned: {
+      value: {
+        name: "Machine workspace",
+        slug: "machine-workspace",
+        locale: "en",
+      },
+    },
+  };
+  const result = lintDocument(document, "machine-owned-tenant");
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.equal(
+    contract.components.schemas.TenantSpec.required.includes("administrator"),
+    false,
+  );
+  assert.deepEqual(
+    Object.keys(
+      contract.components.schemas.TenantSpec.properties.administrator
+        .properties,
+    ).sort(),
+    ["email", "name"],
+  );
+});
+
+test("TenantSpec keeps administrator metadata fields validated when supplied", () => {
+  const document = structuredClone(contract);
+  const request =
+    document.paths["/v1/tenant-plans"].post.requestBody.content[
+      "application/json"
+    ];
+  request.examples = {
+    invalidPartialAdministrator: {
+      value: {
+        name: "Machine workspace",
+        slug: "machine-workspace",
+        locale: "en",
+        administrator: { name: "Only a name" },
+      },
+    },
+  };
+  const result = lintDocument(document, "machine-administrator-validation");
+  assert.notEqual(result.status, 0);
+});
+
 test("the OpenAPI validator rejects secret-bearing website metadata and unsafe request examples", () => {
   const document = structuredClone(contract);
   const response =
