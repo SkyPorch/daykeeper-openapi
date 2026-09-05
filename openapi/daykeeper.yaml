@@ -774,10 +774,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/DomainVerificationResponse"
         "400": { $ref: "#/components/responses/DomainError" }
+        "413": { $ref: "#/components/responses/DomainRequestError" }
+        "415": { $ref: "#/components/responses/DomainRequestError" }
         "401": { $ref: "#/components/responses/DomainError" }
         "403": { $ref: "#/components/responses/DomainError" }
         "404": { $ref: "#/components/responses/DomainError" }
         "409": { $ref: "#/components/responses/DomainError" }
+        "429": { $ref: "#/components/responses/DomainRateLimited" }
         "503": { $ref: "#/components/responses/DomainError" }
   "/v1/tenants/{tenantId}/domain-verifications/{verificationId}":
     parameters:
@@ -786,7 +789,7 @@ paths:
     get:
       operationId: getDomainVerification
       summary: Read a tenant domain verification
-      description: Read durable DNS evidence without activating traffic.
+      description: Read durable DNS evidence without activating traffic. Requires an opaque machine-owner credential; human and delegated tokens are unsupported.
       tags: [Domain verification]
       security:
         - daykeeperOAuth: [daykeeper.accounts:read]
@@ -803,6 +806,7 @@ paths:
         "401": { $ref: "#/components/responses/DomainError" }
         "403": { $ref: "#/components/responses/DomainError" }
         "404": { $ref: "#/components/responses/DomainError" }
+        "429": { $ref: "#/components/responses/DomainRateLimited" }
   "/v1/tenants/{tenantId}/domain-verifications/{verificationId}/verify":
     parameters:
       - $ref: "#/components/parameters/TenantId"
@@ -834,10 +838,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/DomainVerificationResponse"
         "400": { $ref: "#/components/responses/DomainError" }
+        "413": { $ref: "#/components/responses/DomainRequestError" }
+        "415": { $ref: "#/components/responses/DomainRequestError" }
         "401": { $ref: "#/components/responses/DomainError" }
         "403": { $ref: "#/components/responses/DomainError" }
         "404": { $ref: "#/components/responses/DomainError" }
         "409": { $ref: "#/components/responses/DomainError" }
+        "429": { $ref: "#/components/responses/DomainRateLimited" }
         "503": { $ref: "#/components/responses/DomainError" }
   "/v1/tenants/{tenantId}/domain-verifications/{verificationId}/revoke":
     parameters:
@@ -846,7 +853,7 @@ paths:
     post:
       operationId: revokeDomainVerification
       summary: Revoke a tenant domain verification
-      description: Revoke durable evidence without changing traffic activation.
+      description: Revoke durable evidence without changing traffic activation. Requires an opaque machine-owner credential; human and delegated tokens are unsupported.
       tags: [Domain verification]
       security:
         - daykeeperOAuth: [daykeeper.accounts:write]
@@ -869,6 +876,9 @@ paths:
         "401": { $ref: "#/components/responses/DomainError" }
         "403": { $ref: "#/components/responses/DomainError" }
         "404": { $ref: "#/components/responses/DomainError" }
+        "413": { $ref: "#/components/responses/DomainRequestError" }
+        "415": { $ref: "#/components/responses/DomainRequestError" }
+        "429": { $ref: "#/components/responses/DomainRateLimited" }
   "/v1/tenants/{tenantId}/provisioning-operation":
     parameters:
       - $ref: "#/components/parameters/TenantId"
@@ -1482,6 +1492,32 @@ components:
       headers:
         Cache-Control:
           schema: { type: string, const: no-store }
+        X-Request-Id:
+          schema: { type: string }
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    DomainRequestError:
+      description: Domain verification request rejected; never cache this response.
+      headers:
+        Cache-Control:
+          schema: { type: string, const: no-store }
+        X-Request-Id:
+          schema: { type: string }
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    DomainRateLimited:
+      description: Domain verification request rate limited; retry only as directed.
+      headers:
+        Cache-Control:
+          schema: { type: string, const: no-store }
+        Retry-After:
+          schema:
+            type: integer
+            minimum: 0
         X-Request-Id:
           schema: { type: string }
       content:

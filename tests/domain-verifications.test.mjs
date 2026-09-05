@@ -76,8 +76,7 @@ test("domain verification operations are machine-owner scoped and non-cacheable"
     for (const status of Object.keys(operation.responses)) {
       const responseDefinition = response(operation, status);
       if (status === "default") continue;
-      if (responseDefinition.$ref === "#/components/responses/DomainError")
-        continue;
+      if (responseDefinition.$ref) continue;
       assert.equal(
         responseDefinition.headers["Cache-Control"].schema.const,
         "no-store",
@@ -85,6 +84,14 @@ test("domain verification operations are machine-owner scoped and non-cacheable"
       );
     }
   }
+  for (const name of ["DomainError", "DomainRequestError", "DomainRateLimited"])
+    assert.equal(
+      contract.components.responses[name].headers["Cache-Control"].schema.const,
+      "no-store",
+    );
+  assert.ok(
+    contract.components.responses.DomainRateLimited.headers["Retry-After"],
+  );
   for (const operation of [verify, revoke])
     assert.equal(
       operation.requestBody.content["application/json"].schema.$ref,
