@@ -141,7 +141,7 @@ test("website preparation extends tenant plan/apply without changing existing op
   ]);
 });
 
-test("API inbox preparation has an exact spec, separate read, and no traffic activation", () => {
+test("API inbox preparation has an exact spec and separate read", () => {
   const schemas = contract.components.schemas;
   const apiSpec = schemas.ApiInboxSpec;
   assert.equal(apiSpec.type, "object");
@@ -165,7 +165,7 @@ test("API inbox preparation has an exact spec, separate read, and no traffic act
 
   const capabilities = schemas.Capabilities.properties.apiInboxes;
   assert.deepEqual(capabilities.required, ["enabled", "trafficActivation"]);
-  assert.equal(capabilities.properties.trafficActivation.const, false);
+  assert.equal(capabilities.properties.trafficActivation.type, "boolean");
 
   const route = contract.paths["/v1/tenants/{tenantId}/inbox"].get;
   assert.equal(route.operationId, "getInbox");

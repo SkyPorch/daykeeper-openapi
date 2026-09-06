@@ -114,6 +114,22 @@ Human and delegated tokens are not supported, and all success and error
 responses are non-cacheable. This additive contract is unreleased and does not
 authorize DNS changes, route admission, deployment, or package publication.
 
+## Unreleased API inbox activation
+
+Machine-owner credentials with `daykeeper.accounts:write` can activate an
+already prepared API inbox through `/v1/tenants/{tenantId}/inbox-activations`.
+The request is a strict empty JSON object and requires an `Idempotency-Key`.
+Exact replays return the original `201` receipt; an uncertain write must be
+reconciled with the matching GET and is never automatically retried. A receipt
+contains only durable activation state (`activationId`, `tenantId`,
+`channelId`, `intent`, `state`, `createdAt`, `revokedAt`, and `replayed`); it
+does not claim current traffic readiness. Use the tenant inbox read and its
+`trafficEnabled` field for that observation. Revoke is also machine-owner
+scoped and accepts the same strict empty body. All responses are non-cacheable.
+
+This additive contract is unreleased and does not grant DNS, human-owner, or
+customer configuration prerequisites, nor does it publish an SDK.
+
 ## Unreleased customer usage errors
 
 Customer errors retain the required `error` code. Optional `message`, `retryable`

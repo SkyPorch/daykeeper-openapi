@@ -36,6 +36,8 @@ tags:
     description: First-inbox preparation and observed installation readiness.
   - name: Domain verification
     description: DNS observation and durable domain-proof evidence; never traffic activation.
+  - name: API inbox activation
+    description: Machine-owner activation receipts for API inbox traffic.
   - name: Operations
     description: Durable, inspectable provisioning work.
   - name: Flows
@@ -806,6 +808,130 @@ paths:
         "409": { $ref: "#/components/responses/DomainError" }
         "429": { $ref: "#/components/responses/DomainRateLimited" }
         "503": { $ref: "#/components/responses/DomainError" }
+  "/v1/tenants/{tenantId}/inbox-activations":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    post:
+      operationId: activateApiInbox
+      summary: Activate or replay a tenant API inbox
+      description: |
+        Activates the already prepared API inbox for customer traffic and
+        returns a durable receipt. This operation accepts no customer
+        configuration and requires a machine-owner credential with
+        daykeeper.accounts:write. Exact retries with the same Idempotency-Key
+        return the original receipt with replayed set to true. If the write outcome is uncertain, reconcile with
+        GET /v1/tenants/{tenantId}/inbox-activations/{intent}; do not retry
+        automatically. All responses, including errors, are not cacheable.
+      tags: [API inbox activation]
+      security:
+        - daykeeperMachineOwner: []
+      x-daykeeper-required-scopes: [daykeeper.accounts:write]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmptyObject"
+      responses:
+        "201":
+          description: A new or exact-replayed API inbox activation receipt.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiInboxActivationResponse"
+        "400": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "401": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "403": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "404": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "409": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "413": { $ref: "#/components/responses/ApiInboxActivationRequestError" }
+        "415": { $ref: "#/components/responses/ApiInboxActivationRequestError" }
+        "429": { $ref: "#/components/responses/ApiInboxActivationRateLimited" }
+        "503": { $ref: "#/components/responses/ApiInboxActivationError" }
+  "/v1/tenants/{tenantId}/inbox-activations/{intent}":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - name: intent
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 16
+          maxLength: 128
+          pattern: "^[A-Za-z0-9._:-]{16,128}$"
+    get:
+      operationId: getApiInboxActivation
+      summary: Read a tenant API inbox activation receipt
+      description: Read the durable activation receipt without asserting current traffic readiness. Requires a machine-owner credential with daykeeper.accounts:read. All responses, including errors, are not cacheable.
+      tags: [API inbox activation]
+      security:
+        - daykeeperMachineOwner: []
+      x-daykeeper-required-scopes: [daykeeper.accounts:read]
+      responses:
+        "200":
+          description: The durable API inbox activation receipt.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiInboxActivationResponse"
+        "400": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "401": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "403": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "404": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "429": { $ref: "#/components/responses/ApiInboxActivationRateLimited" }
+        "503": { $ref: "#/components/responses/ApiInboxActivationError" }
+  "/v1/tenants/{tenantId}/inbox-activations/{intent}/revoke":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - name: intent
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 16
+          maxLength: 128
+          pattern: "^[A-Za-z0-9._:-]{16,128}$"
+    post:
+      operationId: revokeApiInboxActivation
+      summary: Revoke a tenant API inbox activation
+      description: Revoke the durable activation receipt and disable its activation state. Requires a machine-owner credential with daykeeper.accounts:write; it accepts no customer configuration. All responses, including errors, are not cacheable.
+      tags: [API inbox activation]
+      security:
+        - daykeeperMachineOwner: []
+      x-daykeeper-required-scopes: [daykeeper.accounts:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmptyObject"
+      responses:
+        "200":
+          description: The revoked API inbox activation receipt.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiInboxActivationResponse"
+        "400": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "401": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "403": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "404": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "409": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "413": { $ref: "#/components/responses/ApiInboxActivationRequestError" }
+        "415": { $ref: "#/components/responses/ApiInboxActivationRequestError" }
+        "429": { $ref: "#/components/responses/ApiInboxActivationRateLimited" }
+        "503": { $ref: "#/components/responses/ApiInboxActivationError" }
   "/v1/tenants/{tenantId}/domain-verifications/{verificationId}":
     parameters:
       - $ref: "#/components/parameters/TenantId"
@@ -1397,6 +1523,11 @@ paths:
           $ref: "#/components/responses/Error"
 components:
   securitySchemes:
+    daykeeperMachineOwner:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: Opaque machine-owner bearer credential. The operation's required Daykeeper account scope is documented on each operation.
     daykeeperOAuth:
       type: oauth2
       description: Short-lived, audience-bound Daykeeper OAuth access token.
@@ -1553,6 +1684,43 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+    ApiInboxActivationError:
+      description: API inbox activation error; never cache this response.
+      headers:
+        Cache-Control:
+          schema: { type: string, const: no-store }
+        X-Request-Id:
+          schema: { type: string }
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ApiInboxActivationRequestError:
+      description: API inbox activation request rejected; never cache this response.
+      headers:
+        Cache-Control:
+          schema: { type: string, const: no-store }
+        X-Request-Id:
+          schema: { type: string }
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ApiInboxActivationRateLimited:
+      description: API inbox activation is bounded; do not retry uncertain writes automatically.
+      headers:
+        Cache-Control:
+          schema: { type: string, const: no-store }
+        Retry-After:
+          schema:
+            type: integer
+            minimum: 1
+        X-Request-Id:
+          schema: { type: string }
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
   schemas:
     Capabilities:
       type: object
@@ -1584,14 +1752,13 @@ components:
         apiInboxes:
           type: object
           additionalProperties: false
-          description: API-only inbox preparation capability. Traffic activation is not supported.
+          description: API-only inbox preparation and optional traffic activation capability.
           required: [enabled, trafficActivation]
           properties:
             enabled:
               type: boolean
             trafficActivation:
               type: boolean
-              const: false
         customerSessions:
           type: object
           additionalProperties: false
@@ -1903,6 +2070,48 @@ components:
     EmptyObject:
       type: object
       additionalProperties: false
+    ApiInboxActivation:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          activationId,
+          tenantId,
+          channelId,
+          intent,
+          state,
+          createdAt,
+          revokedAt,
+          replayed,
+        ]
+      properties:
+        activationId:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        channelId:
+          type: string
+          format: uuid
+        intent:
+          type: string
+          minLength: 16
+          maxLength: 128
+          pattern: "^[A-Za-z0-9._:-]{16,128}$"
+        state:
+          type: string
+          enum: [active, revoked]
+        createdAt:
+          type: integer
+          format: int64
+          minimum: 0
+        revokedAt:
+          type: [integer, "null"]
+          format: int64
+          minimum: 0
+        replayed:
+          type: boolean
     DomainVerificationDns:
       type: object
       additionalProperties: false
@@ -3312,6 +3521,13 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/DomainVerification"
+    ApiInboxActivationResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ApiInboxActivation"
     EmailChannelPlanResponse:
       allOf:
         - $ref: "#/components/schemas/SuccessEnvelope"
