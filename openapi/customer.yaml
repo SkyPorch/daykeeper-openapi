@@ -8,6 +8,12 @@ info:
     application's backend supplies a short-lived, tenant-bound end-user token.
     It never accepts Daykeeper administrative credentials and never exposes
     infrastructure-provider credentials or response bodies.
+
+    API-only inbox gateways do not provide the embedded widget experience.
+    After authenticating the customer token, `GET /v1/identity` and
+    `POST /v1/anonymous-conversations/claim` return `409` with
+    `{ "error": "widget_unavailable" }` before calling the conversation
+    provider. Existing widget tenants retain the behavior documented below.
   contact:
     name: SkyPorch
     url: https://github.com/SkyPorch/daykeeper-openapi
@@ -33,6 +39,10 @@ paths:
     get:
       operationId: getCustomerIdentity
       summary: Get widget-safe customer identity
+      description: |
+        API-only inbox gateways authenticate the customer token and return `409`
+        `{ "error": "widget_unavailable" }` before calling the conversation
+        provider. Use a widget-enabled tenant gateway for this operation.
       tags: [Identity]
       responses:
         "200":
@@ -43,6 +53,8 @@ paths:
                 $ref: "#/components/schemas/CustomerIdentity"
         "401":
           $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/WidgetUnavailable"
         default:
           $ref: "#/components/responses/Error"
   /v1/conversations:
@@ -166,6 +178,10 @@ paths:
       description: |
         The widget token proves possession of the anonymous thread. The gateway
         refuses identified, foreign-tenant, or email-mismatched contacts.
+
+        API-only inbox gateways authenticate the token and return `409`
+        `{ "error": "widget_unavailable" }` before calling the conversation
+        provider. Use a widget-enabled tenant gateway for this operation.
       tags: [Conversations]
       requestBody:
         required: true
@@ -182,6 +198,8 @@ paths:
                 $ref: "#/components/schemas/ClaimConversationResult"
         "401":
           $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/WidgetUnavailable"
         default:
           $ref: "#/components/responses/Error"
   /v1/lifecycle-messages:
@@ -275,6 +293,17 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/CustomerError"
+    WidgetUnavailable:
+      description: API-only inbox gateways do not support widget identity or anonymous-conversation claims.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CustomerError"
+          examples:
+            apiOnlyInbox:
+              summary: Widget operation on an API-only inbox
+              value:
+                error: widget_unavailable
   schemas:
     Conversation:
       type: object

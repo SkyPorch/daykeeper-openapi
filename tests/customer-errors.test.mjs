@@ -65,6 +65,30 @@ test("customer error advice is optional, extensible and does not change legacy r
     /do not automatically replay/,
   );
 });
+
+test("API-only inboxes document widget operation refusal after authentication", () => {
+  for (const [route, method] of [
+    ["/v1/identity", "get"],
+    ["/v1/anonymous-conversations/claim", "post"],
+  ]) {
+    const operation = contract.paths[route][method];
+    assert.match(operation.description, /API-only inbox gateways authenticate/);
+    assert.equal(
+      operation.responses["409"].$ref,
+      "#/components/responses/WidgetUnavailable",
+    );
+  }
+  const response = contract.components.responses.WidgetUnavailable;
+  assert.equal(
+    response.content["application/json"].schema.$ref,
+    "#/components/schemas/CustomerError",
+  );
+  assert.equal(
+    response.content["application/json"].examples.apiOnlyInbox.value.error,
+    "widget_unavailable",
+  );
+});
+
 test("the actual OpenAPI validator accepts legacy, managed quota and newer-field responses", () => {
   const result = validate(
     {
