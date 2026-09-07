@@ -3587,6 +3587,13 @@ components:
             type: string
         correlationId:
           type: string
+        outcomeUnknown:
+          type: boolean
+          description: |
+            Optional marker for a dispatched mutation whose response was lost
+            or unavailable. When true, inspect the affected resource before
+            deciding whether to repeat the same request; clients must not
+            automatically retry the write.
         fields:
           type: array
           items:
