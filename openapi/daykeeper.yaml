@@ -38,6 +38,8 @@ tags:
     description: DNS observation and durable domain-proof evidence; never traffic activation.
   - name: API inbox activation
     description: Machine-owner activation receipts for API inbox traffic.
+  - name: Operator conversations
+    description: Tenant-scoped support conversation inspection and replies.
   - name: Operations
     description: Durable, inspectable provisioning work.
   - name: Flows
@@ -1190,6 +1192,89 @@ paths:
           $ref: "#/components/responses/IdempotencyKeyReused"
         default:
           $ref: "#/components/responses/Error"
+  /v1/tenants/{tenantId}/conversations:
+    get:
+      operationId: listOperatorConversations
+      summary: List support conversations for one tenant
+      description: |
+        Requires daykeeper.conversations:read. The tenant is selected only by
+        the authenticated principal and path; provider credentials and
+        provider-internal identifiers are never returned. Results are bounded
+        to 100 conversations. This is a read-only operation.
+      tags: [Operator conversations]
+      security:
+        - daykeeperOAuth: [daykeeper.conversations:read]
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+      responses:
+        "200":
+          description: Bounded tenant conversation list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorConversationListResponse"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/tenants/{tenantId}/conversations/{conversationId}/messages:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - name: conversationId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+    get:
+      operationId: listOperatorConversationMessages
+      summary: Read messages for one support conversation
+      description: Requires daykeeper.conversations:read. Messages are bounded to 200 and provider internals are omitted.
+      tags: [Operator conversations]
+      security:
+        - daykeeperOAuth: [daykeeper.conversations:read]
+      responses:
+        "200":
+          description: Bounded conversation messages.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorConversationMessagesResponse"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: sendOperatorConversationReply
+      summary: Send one plain-text support reply
+      description: |
+        Requires daykeeper.conversations:write. The server dispatches the
+        provider write once and does not automatically retry it. If the
+        response is lost, the caller must inspect the conversation before
+        deciding whether to repeat the request. Content is trimmed and limited
+        to 4,000 characters.
+      tags: [Operator conversations]
+      security:
+        - daykeeperOAuth: [daykeeper.conversations:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OperatorReplyInput"
+      responses:
+        "201":
+          description: Reply accepted by the provider.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorConversationReplyResponse"
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/flows:
     get:
       operationId: listFlows
@@ -1548,6 +1633,8 @@ components:
             daykeeper.customer-sessions:write: Mint tenant-bound customer session tokens.
             daykeeper.lifecycle:write: Mint tokens for tenant lifecycle messages.
             daykeeper.customers:delete: Mint target-bound customer erasure tokens.
+            daykeeper.conversations:read: Read tenant-scoped support conversations and messages.
+            daykeeper.conversations:write: Send one tenant-scoped plain-text support reply.
   parameters:
     IdempotencyKey:
       name: Idempotency-Key
@@ -1722,6 +1809,94 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
   schemas:
+    OperatorConversation:
+      type: object
+      additionalProperties: false
+      required: [id, status, preview]
+      properties:
+        id:
+          {
+            type: integer,
+            format: int64,
+            minimum: 1,
+            maximum: 9007199254740991,
+          }
+        status: { type: string, maxLength: 40 }
+        preview: { type: string, maxLength: 4000 }
+        createdAt: { type: string, format: date-time, maxLength: 64 }
+        updatedAt: { type: string, format: date-time, maxLength: 64 }
+        lastActivityAt: { type: string, format: date-time, maxLength: 64 }
+    OperatorMessage:
+      type: object
+      additionalProperties: false
+      required:
+        [id, conversationId, senderType, messageType, content, createdAt]
+      properties:
+        id:
+          {
+            type: integer,
+            format: int64,
+            minimum: 1,
+            maximum: 9007199254740991,
+          }
+        conversationId:
+          {
+            type: integer,
+            format: int64,
+            minimum: 1,
+            maximum: 9007199254740991,
+          }
+        senderType: { type: string, maxLength: 40 }
+        messageType: { type: integer, minimum: 0, maximum: 3 }
+        content: { type: string, maxLength: 16000 }
+        createdAt: { type: string, maxLength: 64 }
+    OperatorReplyInput:
+      type: object
+      additionalProperties: false
+      required: [content]
+      properties:
+        content: { type: string, minLength: 1, maxLength: 4000 }
+    OperatorConversationList:
+      type: object
+      additionalProperties: false
+      required: [tenantId, conversations]
+      properties:
+        tenantId: { type: string, format: uuid }
+        conversations:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/OperatorConversation" }
+    OperatorConversationMessages:
+      type: object
+      additionalProperties: false
+      required: [tenantId, conversationId, messages]
+      properties:
+        tenantId: { type: string, format: uuid }
+        conversationId:
+          {
+            type: integer,
+            format: int64,
+            minimum: 1,
+            maximum: 9007199254740991,
+          }
+        messages:
+          type: array
+          maxItems: 200
+          items: { $ref: "#/components/schemas/OperatorMessage" }
+    OperatorConversationReply:
+      type: object
+      additionalProperties: false
+      required: [tenantId, conversationId, message]
+      properties:
+        tenantId: { type: string, format: uuid }
+        conversationId:
+          {
+            type: integer,
+            format: int64,
+            minimum: 1,
+            maximum: 9007199254740991,
+          }
+        message: { $ref: "#/components/schemas/OperatorMessage" }
     Capabilities:
       type: object
       # Response envelope: open so older clients tolerate new fields.
@@ -3392,6 +3567,8 @@ components:
         - daykeeper.customer-sessions:write
         - daykeeper.lifecycle:write
         - daykeeper.customers:delete
+        - daykeeper.conversations:read
+        - daykeeper.conversations:write
     ErrorDetail:
       type: object
       # Response envelope: open so older clients tolerate new fields.
@@ -3586,6 +3763,27 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/FlowVersion"
+    OperatorConversationListResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/OperatorConversationList"
+    OperatorConversationMessagesResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/OperatorConversationMessages"
+    OperatorConversationReplyResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/OperatorConversationReply"
     SuccessEnvelope:
       type: object
       additionalProperties: false
