@@ -79,10 +79,10 @@ paths:
 
         Unconfigured, revoked, and exhausted assignments are successful status
         reads, not HTTP policy errors. This read neither assigns an entitlement
-        nor reserves capacity. The one-tenant free-2026-08-31 policy is a
-        provisional provisioning safeguard, not approved marketing pricing or
-        general free-tier activation. The legacy metering fields describe this
-        admission-only contract, not optional provider enforcement. Use /v1/usage
+        nor reserves capacity. The returned policy is a provisioning safeguard,
+        not approved marketing pricing or general tier activation. The legacy
+        metering fields describe this admission-only contract, not optional
+        provider enforcement. Use /v1/usage
         for recorded resource counters; neither read proves traffic readiness.
       tags: [Entitlements]
       security:
@@ -1999,11 +1999,12 @@ components:
       type: object
       additionalProperties: false
       description: |
-        Immutable, versioned internal admission policy. The current
-        free-2026-08-31 policy permits one persisted tenant per organization.
-        That allowance is provisional, not approved pricing or a promise of
-        message, storage, channel, signup, or billing capabilities. Read the
-        returned tenantLimit rather than hardcoding the current example value.
+        Immutable, versioned internal admission policy. The current immutable
+        policy permits a bounded number of persisted
+        tenants per organization. Free and paid policy plans are represented
+        here for admission reporting; this field is not a billing entitlement
+        or a promise of provider capabilities. Read the returned tenantLimit
+        rather than hardcoding the current example value.
       required: [version, plan, provisional, tenantLimit]
       properties:
         version:
@@ -2012,7 +2013,7 @@ components:
           examples: [free-2026-08-31]
         plan:
           type: string
-          const: free
+          enum: [free, pro, scale]
         provisional:
           type: boolean
           const: true
@@ -2079,15 +2080,33 @@ components:
             - type: "null"
       oneOf:
         - properties:
+            enforced:
+              const: true
             allowed:
               const: true
+            used:
+              type: integer
+            limit:
+              type: [integer, "null"]
+            remaining:
+              type: [integer, "null"]
             denial:
               type: "null"
+          required: [enforced, allowed, used, limit, remaining, denial]
         - properties:
+            enforced:
+              const: true
             allowed:
               const: false
+            used:
+              type: integer
+            limit:
+              type: [integer, "null"]
+            remaining:
+              type: [integer, "null"]
             denial:
               $ref: "#/components/schemas/TenantAdmissionDenial"
+          required: [enforced, allowed, used, limit, remaining, denial]
     EntitlementStatus:
       type: object
       additionalProperties: false
