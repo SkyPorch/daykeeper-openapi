@@ -17,6 +17,25 @@ customer-facing SDK.
 SDKs are generated or contract-tested against tagged specifications from this
 repository. Service implementation types are not a public contract.
 
+## Unreleased entitlement contract
+
+`GET /v1/entitlements` requires `daykeeper.accounts:read` and describes only
+the authenticated principal's organization. It exposes no organization selector,
+assignment mutation, or upgrade endpoint. Tenant-bound principals with that
+scope see the organization-wide admission count.
+
+The `free-2026-08-31` policy's one-tenant allowance is a provisional provisioning
+safeguard, not approved marketing pricing or a shipped self-serve free tier.
+Conversation and storage metering are explicitly `not_enforced`. A missing,
+revoked, or exhausted assignment remains a successful status read; the
+structured `ENTITLEMENT_REQUIRED` (403), `ENTITLEMENT_INACTIVE` (403), and
+`TENANT_QUOTA_EXCEEDED` (409) errors describe new tenant admission failures.
+
+This source change creates no release, deployment approval, or SDK publication.
+Release coordination must account for the existing tenant-apply compatibility
+impact before enforcing assignments for current consumers; the new read
+operation itself is additive under [`VERSIONING.md`](VERSIONING.md).
+
 ## Check and bundle
 
 ```sh
@@ -28,6 +47,10 @@ pnpm check
 `pnpm bundle` writes a dereferenced distribution artifact to
 `dist/daykeeper.openapi.yaml` and `dist/customer.openapi.yaml`. Generated
 files are CI artifacts, not hand-edited source.
+
+`pnpm test` checks entitlement scopes, response shapes, and stable errors, then
+uses the same OpenAPI validator to accept valid status examples and reject
+malformed ones. It does not contact a deployed service.
 
 ## Compatibility
 

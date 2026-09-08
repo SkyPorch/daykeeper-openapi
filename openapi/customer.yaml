@@ -594,7 +594,8 @@ components:
           type: boolean
     CustomerError:
       type: object
-      additionalProperties: false
+      # Response envelope: open so older clients tolerate new fields.
+      additionalProperties: true
       required: [error]
       properties:
         error:

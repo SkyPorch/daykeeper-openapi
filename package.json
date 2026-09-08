@@ -9,10 +9,11 @@
   },
   "scripts": {
     "bundle": "redocly bundle openapi/daykeeper.yaml --output dist/daykeeper.openapi.yaml && redocly bundle openapi/customer.yaml --output dist/customer.openapi.yaml",
-    "check": "pnpm format:check && pnpm lint && pnpm bundle",
+    "check": "pnpm format:check && pnpm lint && pnpm bundle && pnpm test",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "lint": "redocly lint openapi/daykeeper.yaml openapi/customer.yaml"
+    "lint": "redocly lint openapi/daykeeper.yaml openapi/customer.yaml",
+    "test": "node --test tests/*.test.mjs"
   },
   "devDependencies": {
     "@redocly/cli": "2.48.0",

@@ -9,6 +9,7 @@ rules:
   operation-summary: error
   security-defined: error
   spec-strict-refs: error
+  no-invalid-media-type-examples: error
   rule/daykeeper-license-name:
     severity: error
     message: The license name must match the repository's Apache-2.0 license.

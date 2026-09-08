@@ -10,6 +10,10 @@ Contract releases use semantic versions and immutable GitHub tags of the form
 - Major: removed or renamed operations or fields; stricter accepted input;
   changed authentication, authorization, defaults, status codes, or semantics.
 
+Response schemas set `additionalProperties: true` so a client generated from an
+older contract still decodes responses that carry newly added fields; request
+bodies stay closed so unknown input is rejected rather than silently ignored.
+
 The path prefix (`/v1`) changes only for an intentionally incompatible API
 generation. SDK versions do not have to equal contract versions, but every SDK
 release records the exact contract tag and commit used to generate or verify it.
