@@ -773,10 +773,6 @@ components:
         TENANT_QUOTA_EXCEEDED means persisted tenant occupancy meets or exceeds
         the assigned limit. New codes may be added; an unknown denial must not
         be treated as permission to provision.
-      enum:
-        - ENTITLEMENT_REQUIRED
-        - ENTITLEMENT_INACTIVE
-        - TENANT_QUOTA_EXCEEDED
     TenantAdmissionDenial:
       type: object
       additionalProperties: false
@@ -826,6 +822,17 @@ components:
           anyOf:
             - $ref: "#/components/schemas/TenantAdmissionDenial"
             - type: "null"
+      oneOf:
+        - properties:
+            allowed:
+              const: true
+            denial:
+              type: "null"
+        - properties:
+            allowed:
+              const: false
+            denial:
+              $ref: "#/components/schemas/TenantAdmissionDenial"
     EntitlementStatus:
       type: object
       additionalProperties: false

@@ -154,9 +154,9 @@ test("new tenant admission documents all three stable non-retryable errors", () 
     assert.deepEqual(error.nextActions, nextActions);
     assert.equal(typeof error.correlationId, "string");
   }
-  assert.deepEqual(
+  assert.equal(
     contract.components.schemas.TenantAdmissionDenialCode.enum,
-    expected.map(([, , code]) => code),
+    undefined,
   );
   // Other existing conflict and authorization errors remain representable.
   assert.equal(
@@ -192,6 +192,9 @@ test("the OpenAPI validator accepts active, revoked, full, and unconfigured stat
   const existingUnconfigured = structuredClone(examples.unconfigured.value);
   existingUnconfigured.data.tenantProvisioning.used = 2;
   examples.existingUnconfigured = { value: existingUnconfigured };
+  const futureDenial = structuredClone(examples.unconfigured.value);
+  futureDenial.data.tenantProvisioning.denial.code = "FUTURE_DENIAL";
+  examples.futureDenial = { value: futureDenial };
   const result = lintDocument(document, "valid-status-examples");
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 });
@@ -222,12 +225,17 @@ test("the OpenAPI validator rejects malformed entitlement response examples", ()
         nextActions,
       };
     },
-    unknownDenial: (data) => {
+    contradictoryAllowed: (data) => {
+      data.tenantProvisioning.allowed = true;
       data.tenantProvisioning.denial = {
-        code: "UNKNOWN_DENIAL",
+        code: "ENTITLEMENT_INACTIVE",
         retryable: false,
         nextActions,
       };
+    },
+    contradictoryDenied: (data) => {
+      data.tenantProvisioning.allowed = false;
+      data.tenantProvisioning.denial = null;
     },
   };
   for (const [name, mutate] of Object.entries(mutations)) {
