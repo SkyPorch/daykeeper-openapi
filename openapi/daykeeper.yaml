@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Daykeeper Management API
-  version: 0.1.0
+  version: 0.2.0
   summary: Safe, multi-tenant support administration for people and agents.
   description: |
     Daykeeper owns tenant lifecycle, support-channel provisioning, durable
@@ -22,12 +22,24 @@ tags:
     description: Runtime feature and schema discovery.
   - name: Entitlements
     description: Current-organization admission policy and enforced-resource discovery.
+  - name: Usage
+    description: Organization-wide recorded resource-safety counters, not billing or traffic admission.
+  - name: Agent credentials
+    description: Reveal-once, owner-managed credentials for headless workloads that cannot use hosted OAuth.
   - name: Tenants
     description: Tenant planning, provisioning, and observed state.
   - name: Customer sessions
     description: Short-lived customer and service tokens for a tenant gateway.
   - name: Email channels
     description: Email-domain planning, DNS evidence, and round-trip readiness.
+  - name: Website channels
+    description: First-inbox preparation and observed installation readiness.
+  - name: Domain verification
+    description: DNS observation and durable domain-proof evidence; never traffic activation.
+  - name: API inbox activation
+    description: Machine-owner activation receipts for API inbox traffic.
+  - name: Operator conversations
+    description: Tenant-scoped support conversation inspection and replies.
   - name: Operations
     description: Durable, inspectable provisioning work.
   - name: Flows
@@ -69,8 +81,9 @@ paths:
         reads, not HTTP policy errors. This read neither assigns an entitlement
         nor reserves capacity. The one-tenant free-2026-08-31 policy is a
         provisional provisioning safeguard, not approved marketing pricing or
-        general free-tier activation. Conversation and storage metering are
-        explicitly not enforced.
+        general free-tier activation. The legacy metering fields describe this
+        admission-only contract, not optional provider enforcement. Use /v1/usage
+        for recorded resource counters; neither read proves traffic readiness.
       tags: [Entitlements]
       security:
         - daykeeperOAuth:
@@ -145,10 +158,275 @@ paths:
           description: The access token lacks daykeeper.accounts:read (SCOPE_REQUIRED).
         default:
           $ref: "#/components/responses/Error"
+  /v1/usage:
+    get:
+      operationId: getUsage
+      summary: Inspect the current organization's recorded resource usage
+      description: |
+        Requires organization-wide daykeeper.billing:read. Tenant-bound
+        credentials are rejected, including those carrying that scope. There
+        is no organization, tenant, period, or policy selector; query parameters
+        are rejected. The organization comes only from the verified principal.
+
+        This read reports committed resource-safety counters in the current UTC
+        calendar month, pooled across the organization's tenants in one cell.
+        It is not a global multi-cell total, billable usage, a delivery count,
+        or a resolved-conversation count. All metered message records count,
+        including private, activity, human and automated records. Legacy traffic
+        without the optional provider boundary is not retroactively metered.
+
+        Unconfigured and paused assignments are successful reads. Null limits
+        mean no assignment, not unlimited capacity. Zero is an actual zero
+        allowance. Remaining capacity is clamped at zero. A new month does not
+        activate traffic or guarantee a retry; writeAdmission is always
+        not_evaluated. Installation, identity, routing, and current write-time
+        admission are checked elsewhere. This endpoint does not mutate them.
+      tags: [Usage]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.billing:read
+      responses:
+        "200":
+          description: One committed snapshot of the authenticated organization's recorded usage.
+          headers:
+            Cache-Control:
+              description: Usage responses, including errors, must not be cached.
+              schema:
+                type: string
+                const: no-store
+            X-Request-Id:
+              description: Correlation identifier for support.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageStatusResponse"
+              examples:
+                active:
+                  summary: Synthetic provisional policy; not a commercial allowance
+                  value:
+                    data:
+                      organizationId: 10000000-0000-4000-8000-000000000001
+                      kind: resource_safety
+                      aggregation: organization_single_cell
+                      asOf: "2026-08-31T12:00:00.000Z"
+                      period:
+                        startsAt: "2026-08-01T00:00:00.000Z"
+                        endsAt: "2026-09-01T00:00:00.000Z"
+                        timezone: UTC
+                      state: active
+                      assignmentVersion: 1
+                      policy:
+                        version: synthetic-safety-policy
+                        provisional: true
+                      resources:
+                        contactRecords:
+                          {
+                            used: 0,
+                            limit: 0,
+                            remaining: 0,
+                            limitReached: true,
+                          }
+                        conversationRecords:
+                          {
+                            used: 2,
+                            limit: 3,
+                            remaining: 1,
+                            limitReached: false,
+                          }
+                        messageRecords:
+                          {
+                            used: 12,
+                            limit: 10,
+                            remaining: 0,
+                            limitReached: true,
+                          }
+                      writeAdmission: not_evaluated
+                      nextActions:
+                        [review_usage_policy, contact_organization_owner]
+        "400":
+          $ref: "#/components/responses/Error"
+          description: Query selectors are not accepted (INVALID_INPUT).
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+          description: Missing billing-read scope (SCOPE_REQUIRED) or tenant-bound credential (ORGANIZATION_ACCESS_REQUIRED). Non-retryable; obtain organization-wide access.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/agent-credentials:
+    get:
+      operationId: listAgentCredentials
+      summary: List the current organization's agent credentials
+      description: |
+        Requires a current human organization owner and
+        daykeeper.credentials:read. The organization comes only from the
+        verified principal; no organization, pagination, or filter selector is
+        accepted. Up to 100 bounded metadata records are returned, with all
+        active credentials ahead of recent inactive history. `hasMore` reports
+        omitted older history. Tokens and token hashes are never returned.
+
+        Hosted OAuth remains the preferred workload identity. This list does
+        not create, renew, recover, rotate, or reactivate a credential.
+      tags: [Agent credentials]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.credentials:read
+      responses:
+        "200":
+          description: Bounded credential metadata for the authenticated organization.
+          headers:
+            Cache-Control:
+              description: Credential metadata must not be cached.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentCredentialPageResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+          description: Missing credential-read scope or current human owner authority.
+        "503":
+          $ref: "#/components/responses/Error"
+          description: Agent credential management is not enabled (FEATURE_UNAVAILABLE).
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createAgentCredential
+      summary: Create a reveal-once agent credential
+      description: |
+        Requires a current human organization owner and
+        daykeeper.credentials:write. The same Idempotency-Key may be submitted
+        again only with the exact original body to reconcile an uncertain
+        response. A fresh write returns the token exactly once. A successful
+        replay returns the original metadata with `token: null`; no secret can
+        be recovered. Do not automatically retry this mutation with a new key.
+
+        The credential expires, cannot administer credentials or members, and
+        can receive only the explicitly selected delegable scopes. Hosted OAuth
+        remains the preferred workload identity.
+      tags: [Agent credentials]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.credentials:write
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAgentCredentialInput"
+      responses:
+        "200":
+          description: The exact original request was replayed; the secret is no longer available.
+          headers:
+            Cache-Control:
+              description: Reveal-once results must not be cached.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateAgentCredentialResponse"
+        "201":
+          description: A credential was created and its secret is revealed exactly once.
+          headers:
+            Cache-Control:
+              description: Reveal-once results must not be cached.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateAgentCredentialResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+          description: Missing credential-write scope or current human owner authority.
+        "409":
+          $ref: "#/components/responses/Error"
+          description: Idempotency input changed or the active credential limit was reached.
+        "429":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+          description: Agent credential management is not enabled (FEATURE_UNAVAILABLE).
+        default:
+          $ref: "#/components/responses/Error"
+  "/v1/agent-credentials/{agentCredentialId}/revoke":
+    parameters:
+      - $ref: "#/components/parameters/AgentCredentialId"
+    post:
+      operationId: revokeAgentCredential
+      summary: Revoke an agent credential
+      description: |
+        Requires a current human organization owner and
+        daykeeper.credentials:write. Revocation atomically disables the
+        underlying principal grant and is safe to repeat. It never creates,
+        replaces, recovers, or returns a secret.
+      tags: [Agent credentials]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.credentials:write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "200":
+          description: The credential is revoked, including an idempotent replay.
+          headers:
+            Cache-Control:
+              description: Credential mutation results must not be cached.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevokeAgentCredentialResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+          description: Missing credential-write scope or current human owner authority.
+        "404":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+          description: Agent credential management is not enabled (FEATURE_UNAVAILABLE).
+        default:
+          $ref: "#/components/responses/Error"
   /v1/tenant-plans:
     post:
       operationId: planTenant
       summary: Plan creation of a tenant
+      description: |
+        Optional website settings prepare the first website inbox in this same
+        tenant operation. Inspect websiteInboxes in capabilities first; disabled
+        provisioning rejects website settings with FEATURE_UNAVAILABLE. Omitting
+        website preserves account-only behavior. Plans with website settings
+        explain that preparation does not enable traffic. Existing entitlement,
+        idempotency and plan-expiry rules still apply. No provider identifier or
+        credential is returned, and preparation is not a successful client test.
       tags: [Tenants]
       security:
         - daykeeperOAuth:
@@ -415,6 +693,389 @@ paths:
           $ref: "#/components/responses/Error"
         default:
           $ref: "#/components/responses/Error"
+  "/v1/tenants/{tenantId}/website-channel":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      operationId: getWebsiteChannel
+      summary: Inspect the tenant's first website inbox
+      description: |
+        A non-cacheable status read, available after an accepted tenant plan
+        containing website settings. Prepared does not mean customer traffic is
+        enabled: routing, identity checks, usage enforcement and installation
+        verification must all pass before activation. This read never activates
+        a channel, returns provider credentials, or creates another inbox.
+        API-only inboxes are served by /inbox and return 404 here.
+      tags: [Website channels]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:read]
+      responses:
+        "200":
+          description: Public website-channel metadata without provider secrets.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebsiteChannelResponse"
+              examples:
+                prepared:
+                  value:
+                    data:
+                      id: "30000000-0000-4000-8000-000000000001"
+                      organizationId: "10000000-0000-4000-8000-000000000001"
+                      tenantId: "20000000-0000-4000-8000-000000000001"
+                      spec:
+                        websiteUrl: https://example.test/
+                        allowedOrigins: [https://example.test]
+                      state: prepared
+                      trafficEnabled: false
+                      version: 2
+                      createdAt: "2026-08-31T00:00:00.000Z"
+                      updatedAt: "2026-08-31T00:01:00.000Z"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  "/v1/tenants/{tenantId}/inbox":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      operationId: getInbox
+      summary: Inspect the tenant's inbox
+      description: Public inbox metadata without provider secrets. Preparation does not enable traffic; activation requires a separate boundary.
+      tags: [Website channels]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:read]
+      responses:
+        "200":
+          description: Public inbox metadata without provider secrets.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InboxChannelResponse"
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  "/v1/tenants/{tenantId}/domain-verifications":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    post:
+      operationId: createDomainVerification
+      summary: Create or replay a tenant domain verification
+      description: |
+        Persists a DNS TXT observation challenge for the exact HTTPS origin.
+        This is durable verification evidence only; it never enables customer
+        traffic. Exact retries with the same Idempotency-Key return the
+        original challenge and DNS value without generating a new nonce.
+        Machine-owner principals are required; human and delegated tokens are
+        not supported. All responses, including errors, are not cacheable.
+      tags: [Domain verification]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:write]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DomainVerificationInput"
+      responses:
+        "201":
+          description: A new or exact-replayed domain verification challenge.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DomainVerificationResponse"
+        "400": { $ref: "#/components/responses/DomainError" }
+        "413": { $ref: "#/components/responses/DomainRequestError" }
+        "415": { $ref: "#/components/responses/DomainRequestError" }
+        "401": { $ref: "#/components/responses/DomainError" }
+        "403": { $ref: "#/components/responses/DomainError" }
+        "404": { $ref: "#/components/responses/DomainError" }
+        "409": { $ref: "#/components/responses/DomainError" }
+        "429": { $ref: "#/components/responses/DomainRateLimited" }
+        "503": { $ref: "#/components/responses/DomainError" }
+  "/v1/tenants/{tenantId}/inbox-activations":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    post:
+      operationId: activateApiInbox
+      summary: Activate or replay a tenant API inbox
+      description: |
+        Activates the already prepared API inbox for customer traffic and
+        returns a durable receipt. This operation accepts no customer
+        configuration and requires a machine-owner credential with
+        daykeeper.accounts:write. Exact retries with the same Idempotency-Key
+        return the original receipt with replayed set to true. If the write outcome is uncertain, reconcile with
+        GET /v1/tenants/{tenantId}/inbox-activations/{intent}; do not retry
+        automatically. All responses, including errors, are not cacheable.
+      tags: [API inbox activation]
+      security:
+        - daykeeperMachineOwner: []
+      x-daykeeper-required-scopes: [daykeeper.accounts:write]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmptyObject"
+      responses:
+        "201":
+          description: A new or exact-replayed API inbox activation receipt.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiInboxActivationResponse"
+        "400": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "401": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "403": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "404": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "409": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "413": { $ref: "#/components/responses/ApiInboxActivationRequestError" }
+        "415": { $ref: "#/components/responses/ApiInboxActivationRequestError" }
+        "429": { $ref: "#/components/responses/ApiInboxActivationRateLimited" }
+        "503": { $ref: "#/components/responses/ApiInboxActivationError" }
+  "/v1/tenants/{tenantId}/inbox-activations/{intent}":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - name: intent
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 16
+          maxLength: 128
+          pattern: "^[A-Za-z0-9._:-]{16,128}$"
+    get:
+      operationId: getApiInboxActivation
+      summary: Read a tenant API inbox activation receipt
+      description: Read the durable activation receipt without asserting current traffic readiness. Requires a machine-owner credential with daykeeper.accounts:read. All responses, including errors, are not cacheable.
+      tags: [API inbox activation]
+      security:
+        - daykeeperMachineOwner: []
+      x-daykeeper-required-scopes: [daykeeper.accounts:read]
+      responses:
+        "200":
+          description: The durable API inbox activation receipt.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiInboxActivationResponse"
+        "400": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "401": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "403": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "404": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "429": { $ref: "#/components/responses/ApiInboxActivationRateLimited" }
+        "503": { $ref: "#/components/responses/ApiInboxActivationError" }
+  "/v1/tenants/{tenantId}/inbox-activations/{intent}/revoke":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - name: intent
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 16
+          maxLength: 128
+          pattern: "^[A-Za-z0-9._:-]{16,128}$"
+    post:
+      operationId: revokeApiInboxActivation
+      summary: Revoke a tenant API inbox activation
+      description: Revoke the durable activation receipt and disable its activation state. Requires a machine-owner credential with daykeeper.accounts:write; it accepts no customer configuration. All responses, including errors, are not cacheable.
+      tags: [API inbox activation]
+      security:
+        - daykeeperMachineOwner: []
+      x-daykeeper-required-scopes: [daykeeper.accounts:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmptyObject"
+      responses:
+        "200":
+          description: The revoked API inbox activation receipt.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiInboxActivationResponse"
+        "400": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "401": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "403": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "404": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "409": { $ref: "#/components/responses/ApiInboxActivationError" }
+        "413": { $ref: "#/components/responses/ApiInboxActivationRequestError" }
+        "415": { $ref: "#/components/responses/ApiInboxActivationRequestError" }
+        "429": { $ref: "#/components/responses/ApiInboxActivationRateLimited" }
+        "503": { $ref: "#/components/responses/ApiInboxActivationError" }
+  "/v1/tenants/{tenantId}/domain-verifications/{verificationId}":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/DomainVerificationId"
+    get:
+      operationId: getDomainVerification
+      summary: Read a tenant domain verification
+      description: Read durable DNS evidence without activating traffic. Requires an opaque machine-owner credential; human and delegated tokens are unsupported.
+      tags: [Domain verification]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:read]
+      responses:
+        "200":
+          description: Domain verification evidence.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DomainVerificationResponse"
+        "400": { $ref: "#/components/responses/DomainError" }
+        "401": { $ref: "#/components/responses/DomainError" }
+        "403": { $ref: "#/components/responses/DomainError" }
+        "404": { $ref: "#/components/responses/DomainError" }
+        "429": { $ref: "#/components/responses/DomainRateLimited" }
+        "503": { $ref: "#/components/responses/DomainError" }
+  "/v1/tenants/{tenantId}/domain-verifications/{verificationId}/verify":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/DomainVerificationId"
+    post:
+      operationId: verifyDomainVerification
+      summary: Verify a tenant domain through DNS
+      description: |
+        Re-observes the public TXT record and commits a short-lived proof
+        receipt. Verification does not activate customer traffic. Machine-owner
+        principals are required and all responses are not cacheable.
+      tags: [Domain verification]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmptyObject"
+      responses:
+        "200":
+          description: Updated or already verified domain evidence.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DomainVerificationResponse"
+        "400": { $ref: "#/components/responses/DomainError" }
+        "413": { $ref: "#/components/responses/DomainRequestError" }
+        "415": { $ref: "#/components/responses/DomainRequestError" }
+        "401": { $ref: "#/components/responses/DomainError" }
+        "403": { $ref: "#/components/responses/DomainError" }
+        "404": { $ref: "#/components/responses/DomainError" }
+        "409": { $ref: "#/components/responses/DomainError" }
+        "429": { $ref: "#/components/responses/DomainRateLimited" }
+        "503": { $ref: "#/components/responses/DomainError" }
+  "/v1/tenants/{tenantId}/domain-verifications/{verificationId}/revoke":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - $ref: "#/components/parameters/DomainVerificationId"
+    post:
+      operationId: revokeDomainVerification
+      summary: Revoke a tenant domain verification
+      description: Revoke durable evidence without changing traffic activation. Requires an opaque machine-owner credential; human and delegated tokens are unsupported.
+      tags: [Domain verification]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmptyObject"
+      responses:
+        "200":
+          description: Revoked domain evidence.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DomainVerificationResponse"
+        "401": { $ref: "#/components/responses/DomainError" }
+        "403": { $ref: "#/components/responses/DomainError" }
+        "404": { $ref: "#/components/responses/DomainError" }
+        "400": { $ref: "#/components/responses/DomainError" }
+        "409": { $ref: "#/components/responses/DomainError" }
+        "413": { $ref: "#/components/responses/DomainRequestError" }
+        "415": { $ref: "#/components/responses/DomainRequestError" }
+        "429": { $ref: "#/components/responses/DomainRateLimited" }
+        "503": { $ref: "#/components/responses/DomainError" }
+  "/v1/tenants/{tenantId}/provisioning-operation":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      operationId: getTenantProvisioningOperation
+      summary: Find a tenant's provisioning operation
+      description: |
+        Read the latest tenant.provision operation for this tenant within the
+        authenticated organization. Use this after reloading or losing an apply
+        response, without creating another tenant. Both read scopes and access
+        to this tenant are required. No query selectors are accepted.
+        An adopted tenant without a creation operation, or an older server,
+        may return 404. This read never retries work or activates customer traffic.
+      tags: [Operations]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.accounts:read
+            - daykeeper.provisioning:read
+      responses:
+        "200":
+          description: Current durable creation operation, without changing its state.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
   "/v1/operations/{operationId}":
     parameters:
       - $ref: "#/components/parameters/OperationId"
@@ -481,10 +1142,28 @@ paths:
     post:
       operationId: createFlow
       summary: Create a flow and its first immutable version
+      description: |
+        Requires an Idempotency-Key header. The first application creates the
+        draft flow and its first immutable version and answers 201 with
+        `replayed: false`. Sending the same key with the exact same body again
+        answers 200 with the original flow and version and `replayed: true`; no
+        second flow is created, even after the flow has since changed.
+
+        Sending the same key with a different body is rejected with
+        IDEMPOTENCY_KEY_REUSED (409) and no write is applied. A slug already in
+        use by another flow is still rejected with RESOURCE_CONFLICT (409).
+
+        When a request fails without a usable response its outcome is unknown.
+        Repeat it with the same key and the exact original body to learn what
+        happened; do not retry an uncertain mutation under a new key. The Node
+        SDK surfaces this state as `outcomeUnknown` on the raised error and will
+        not retry it automatically.
       tags: [Flows]
       security:
         - daykeeperOAuth:
             - daykeeper.flows:write
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -492,16 +1171,110 @@ paths:
             schema:
               $ref: "#/components/schemas/CreateFlowInput"
       responses:
-        "201":
-          description: Draft flow and immutable version one.
+        "200":
+          description: The exact original request was replayed; replayed is true.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FlowWithVersionResponse"
+                $ref: "#/components/schemas/FlowMutationResultResponse"
+        "201":
+          description: Draft flow and immutable version one; replayed is false.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowMutationResultResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+          description: The Idempotency-Key header is missing or malformed (INVALID_INPUT).
         "401":
           $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/IdempotencyKeyReused"
         default:
           $ref: "#/components/responses/Error"
+  /v1/tenants/{tenantId}/conversations:
+    get:
+      operationId: listOperatorConversations
+      summary: List support conversations for one tenant
+      description: |
+        Requires daykeeper.conversations:read. The tenant is selected only by
+        the authenticated principal and path; provider credentials and
+        provider-internal identifiers are never returned. Results are bounded
+        to 100 conversations. This is a read-only operation.
+      tags: [Operator conversations]
+      security:
+        - daykeeperOAuth: [daykeeper.conversations:read]
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+      responses:
+        "200":
+          description: Bounded tenant conversation list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorConversationListResponse"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/tenants/{tenantId}/conversations/{conversationId}/messages:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - name: conversationId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+    get:
+      operationId: listOperatorConversationMessages
+      summary: Read messages for one support conversation
+      description: Requires daykeeper.conversations:read. Messages are bounded to 200 and provider internals are omitted.
+      tags: [Operator conversations]
+      security:
+        - daykeeperOAuth: [daykeeper.conversations:read]
+      responses:
+        "200":
+          description: Bounded conversation messages.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorConversationMessagesResponse"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: sendOperatorConversationReply
+      summary: Send one plain-text support reply
+      description: |
+        Requires daykeeper.conversations:write. The server dispatches the
+        provider write once and does not automatically retry it. If the
+        response is lost, the caller must inspect the conversation before
+        deciding whether to repeat the request. Content is trimmed and limited
+        to 4,000 characters.
+      tags: [Operator conversations]
+      security:
+        - daykeeperOAuth: [daykeeper.conversations:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OperatorReplyInput"
+      responses:
+        "201":
+          description: Reply accepted by the provider.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorConversationReplyResponse"
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/flows:
     get:
       operationId: listFlows
@@ -555,10 +1328,28 @@ paths:
     post:
       operationId: createFlowVersion
       summary: Create the next immutable flow version
+      description: |
+        Requires an Idempotency-Key header. The first application creates the
+        next immutable version and answers 201 with `replayed: false`. Sending
+        the same key with the exact same body again answers 200 with the
+        original version and `replayed: true`; no second version is created.
+
+        Sending the same key with a different body is rejected with
+        IDEMPOTENCY_KEY_REUSED (409) and no write is applied. Optimistic
+        concurrency still applies to every new key: a stale
+        `expectedLatestVersion` is rejected with RESOURCE_VERSION_CONFLICT (409).
+
+        When a request fails without a usable response its outcome is unknown.
+        Repeat it with the same key and the exact original body to learn what
+        happened; do not retry an uncertain mutation under a new key. The Node
+        SDK surfaces this state as `outcomeUnknown` on the raised error and will
+        not retry it automatically.
       tags: [Flows]
       security:
         - daykeeperOAuth:
             - daykeeper.flows:write
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -566,14 +1357,25 @@ paths:
             schema:
               $ref: "#/components/schemas/CreateFlowVersionInput"
       responses:
-        "201":
-          description: Flow and newly created version.
+        "200":
+          description: The exact original request was replayed; replayed is true.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FlowWithVersionResponse"
+                $ref: "#/components/schemas/FlowMutationResultResponse"
+        "201":
+          description: Flow and newly created version; replayed is false.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowMutationResultResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+          description: The Idempotency-Key header is missing or malformed (INVALID_INPUT).
         "401":
           $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/IdempotencyKeyReused"
         default:
           $ref: "#/components/responses/Error"
   "/v1/flows/{flowId}/versions/{version}":
@@ -609,10 +1411,29 @@ paths:
         Publishing records audited desired state. The current capability reports
         flow execution as management_only; this operation does not yet execute a
         flow against customer conversations.
+
+        Requires an Idempotency-Key header. This operation always answers 200:
+        the first application publishes the version and reports
+        `replayed: false`, and the same key with the exact same body answers
+        with the original result and `replayed: true` without publishing again.
+
+        Sending the same key with a different body is rejected with
+        IDEMPOTENCY_KEY_REUSED (409) and no write is applied. Optimistic
+        concurrency still applies to every new key: a stale
+        `expectedResourceVersion` is rejected with RESOURCE_VERSION_CONFLICT
+        (409).
+
+        When a request fails without a usable response its outcome is unknown.
+        Repeat it with the same key and the exact original body to learn what
+        happened; do not retry an uncertain mutation under a new key. The Node
+        SDK surfaces this state as `outcomeUnknown` on the raised error and will
+        not retry it automatically.
       tags: [Flows]
       security:
         - daykeeperOAuth:
             - daykeeper.flows:publish
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -621,17 +1442,177 @@ paths:
               $ref: "#/components/schemas/PublishFlowVersionInput"
       responses:
         "200":
-          description: Flow with the selected published version.
+          description: |
+            Flow with the selected published version. replayed is true when the
+            same key already published this exact request, and false when this
+            request performed the publication.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FlowWithVersionResponse"
+                $ref: "#/components/schemas/FlowMutationResultResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+          description: The Idempotency-Key header is missing or malformed (INVALID_INPUT).
         "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/IdempotencyKeyReused"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/machine-enrollments/challenges:
+    post:
+      operationId: createMachineEnrollmentChallenge
+      summary: Create a signed machine enrollment challenge
+      description: |
+        Creates a short-lived challenge for a machine workspace enrollment.
+        This endpoint uses signed body proofs and deliberately accepts neither
+        bearer authorization nor browser credentials.
+      tags: [Agent credentials]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MachineEnrollmentInput"
+      responses:
+        "201":
+          description: A newly created enrollment challenge.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MachineChallenge"
+        "400":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/machine-enrollments:
+    post:
+      operationId: enrollMachineWorkspace
+      summary: Enroll a machine workspace with a signed proof
+      tags: [Agent credentials]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MachineProofInput"
+      responses:
+        "201":
+          description: A workspace was newly allocated and a credential issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MachineEnrollmentResult"
+        "200":
+          description: The original enrollment result was replayed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MachineEnrollmentResult"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/machine-credential-rotations/challenges:
+    post:
+      operationId: createMachineCredentialRotationChallenge
+      summary: Create a signed machine credential rotation challenge
+      tags: [Agent credentials]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MachineRotationInput"
+      responses:
+        "201":
+          description: A newly created credential rotation challenge.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MachineChallenge"
+        "400":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/machine-credential-rotations:
+    post:
+      operationId: rotateMachineCredential
+      summary: Rotate a machine credential with a signed proof
+      tags: [Agent credentials]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MachineProofInput"
+      responses:
+        "201":
+          description: A new machine credential was issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MachineRotationResult"
+        "200":
+          description: The original rotation result was replayed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MachineRotationResult"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/machine-credential-rotations/current:
+    post:
+      operationId: inspectMachineCredential
+      summary: Inspect the current machine credential with a signed proof
+      tags: [Agent credentials]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MachineProofInput"
+      responses:
+        "200":
+          description: Current machine credential metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MachineCredentialMetadata"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "429":
           $ref: "#/components/responses/Error"
         default:
           $ref: "#/components/responses/Error"
 components:
   securitySchemes:
+    daykeeperMachineOwner:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: Opaque machine-owner bearer credential. The operation's required Daykeeper account scope is documented on each operation.
     daykeeperOAuth:
       type: oauth2
       description: Short-lived, audience-bound Daykeeper OAuth access token.
@@ -641,6 +1622,9 @@ components:
           scopes:
             daykeeper.accounts:read: Read organizations and tenants.
             daykeeper.accounts:write: Plan organization and tenant changes.
+            daykeeper.billing:read: Read organization-wide usage and billing status.
+            daykeeper.credentials:read: List organization agent credential metadata.
+            daykeeper.credentials:write: Create and revoke organization agent credentials as a human owner.
             daykeeper.flows:read: Read flow metadata and versions.
             daykeeper.flows:write: Create flows and immutable versions.
             daykeeper.flows:publish: Publish reviewed flow versions.
@@ -649,17 +1633,27 @@ components:
             daykeeper.customer-sessions:write: Mint tenant-bound customer session tokens.
             daykeeper.lifecycle:write: Mint tokens for tenant lifecycle messages.
             daykeeper.customers:delete: Mint target-bound customer erasure tokens.
+            daykeeper.conversations:read: Read tenant-scoped support conversations and messages.
+            daykeeper.conversations:write: Send one tenant-scoped plain-text support reply.
   parameters:
     IdempotencyKey:
       name: Idempotency-Key
       in: header
       required: true
-      description: A caller-generated key reused only for an exact logical mutation.
+      description: |
+        A caller-generated key reused only for an exact logical mutation. The
+        key is bound to the request the first time it is applied. Repeating that
+        exact request with the same key returns the stored original result
+        instead of writing again, and the operation reports the repeat as a
+        replay. Reusing the key for a different request is rejected and no write
+        is applied. A missing or malformed key is rejected with INVALID_INPUT
+        (400). Use the same key to reconcile a request whose outcome is unknown;
+        do not retry an uncertain mutation under a new key.
       schema:
         type: string
         minLength: 16
         maxLength: 128
-        pattern: "^[A-Za-z0-9._:-]+$"
+        pattern: "^[A-Za-z0-9._:-]{16,128}$"
     TenantId:
       name: tenantId
       in: path
@@ -688,7 +1682,42 @@ components:
       schema:
         type: integer
         minimum: 1
+    AgentCredentialId:
+      name: agentCredentialId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    DomainVerificationId:
+      name: verificationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
   responses:
+    IdempotencyKeyReused:
+      description: |
+        The idempotency key is already bound to a different request, or the
+        mutation conflicts with current state. IDEMPOTENCY_KEY_REUSED is never
+        retryable under the same key and no write was applied; resend the exact
+        original request under that key, or start a new mutation under a new
+        key. Existing flow conflict codes still apply.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            idempotencyKeyReused:
+              value:
+                error:
+                  code: IDEMPOTENCY_KEY_REUSED
+                  message: The idempotency key is already bound to another request
+                  retryable: false
+                  nextActions:
+                    - use_new_idempotency_key
+                  correlationId: 10000000-0000-4000-8000-000000000002
     Error:
       description: Structured Daykeeper error. Resource denials do not disclose cross-tenant existence.
       headers:
@@ -705,7 +1734,169 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+    DomainError:
+      description: Domain verification error; never cache this response.
+      headers:
+        Cache-Control:
+          schema: { type: string, const: no-store }
+        X-Request-Id:
+          schema: { type: string }
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    DomainRequestError:
+      description: Domain verification request rejected; never cache this response.
+      headers:
+        Cache-Control:
+          schema: { type: string, const: no-store }
+        X-Request-Id:
+          schema: { type: string }
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    DomainRateLimited:
+      description: Domain verification request rate limited; retry only as directed.
+      headers:
+        Cache-Control:
+          schema: { type: string, const: no-store }
+        Retry-After:
+          schema:
+            type: integer
+            minimum: 0
+        X-Request-Id:
+          schema: { type: string }
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ApiInboxActivationError:
+      description: API inbox activation error; never cache this response.
+      headers:
+        Cache-Control:
+          schema: { type: string, const: no-store }
+        X-Request-Id:
+          schema: { type: string }
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ApiInboxActivationRequestError:
+      description: API inbox activation request rejected; never cache this response.
+      headers:
+        Cache-Control:
+          schema: { type: string, const: no-store }
+        X-Request-Id:
+          schema: { type: string }
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ApiInboxActivationRateLimited:
+      description: API inbox activation is bounded; do not retry uncertain writes automatically.
+      headers:
+        Cache-Control:
+          schema: { type: string, const: no-store }
+        Retry-After:
+          schema:
+            type: integer
+            minimum: 1
+        X-Request-Id:
+          schema: { type: string }
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
   schemas:
+    OperatorConversation:
+      type: object
+      additionalProperties: false
+      required: [id, status, preview]
+      properties:
+        id:
+          {
+            type: integer,
+            format: int64,
+            minimum: 1,
+            maximum: 9007199254740991,
+          }
+        status: { type: string, maxLength: 40 }
+        preview: { type: string, maxLength: 4000 }
+        createdAt: { type: string, format: date-time, maxLength: 64 }
+        updatedAt: { type: string, format: date-time, maxLength: 64 }
+        lastActivityAt: { type: string, format: date-time, maxLength: 64 }
+    OperatorMessage:
+      type: object
+      additionalProperties: false
+      required:
+        [id, conversationId, senderType, messageType, content, createdAt]
+      properties:
+        id:
+          {
+            type: integer,
+            format: int64,
+            minimum: 1,
+            maximum: 9007199254740991,
+          }
+        conversationId:
+          {
+            type: integer,
+            format: int64,
+            minimum: 1,
+            maximum: 9007199254740991,
+          }
+        senderType: { type: string, maxLength: 40 }
+        messageType: { type: integer, minimum: 0, maximum: 3 }
+        content: { type: string, maxLength: 16000 }
+        createdAt: { type: string, maxLength: 64 }
+    OperatorReplyInput:
+      type: object
+      additionalProperties: false
+      required: [content]
+      properties:
+        content: { type: string, minLength: 1, maxLength: 4000 }
+    OperatorConversationList:
+      type: object
+      additionalProperties: false
+      required: [tenantId, conversations]
+      properties:
+        tenantId: { type: string, format: uuid }
+        conversations:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/OperatorConversation" }
+    OperatorConversationMessages:
+      type: object
+      additionalProperties: false
+      required: [tenantId, conversationId, messages]
+      properties:
+        tenantId: { type: string, format: uuid }
+        conversationId:
+          {
+            type: integer,
+            format: int64,
+            minimum: 1,
+            maximum: 9007199254740991,
+          }
+        messages:
+          type: array
+          maxItems: 200
+          items: { $ref: "#/components/schemas/OperatorMessage" }
+    OperatorConversationReply:
+      type: object
+      additionalProperties: false
+      required: [tenantId, conversationId, message]
+      properties:
+        tenantId: { type: string, format: uuid }
+        conversationId:
+          {
+            type: integer,
+            format: int64,
+            minimum: 1,
+            maximum: 9007199254740991,
+          }
+        message: { $ref: "#/components/schemas/OperatorMessage" }
     Capabilities:
       type: object
       # Response envelope: open so older clients tolerate new fields.
@@ -722,6 +1913,27 @@ components:
           properties:
             enabled:
               type: boolean
+        websiteInboxes:
+          type: object
+          additionalProperties: false
+          description: Optional on older servers. Absent or disabled means website settings are not supported.
+          required: [enabled, trafficActivation]
+          properties:
+            enabled:
+              type: boolean
+            trafficActivation:
+              type: boolean
+              description: Whether self-serve traffic activation is implemented and enabled. Preparation alone is insufficient.
+        apiInboxes:
+          type: object
+          additionalProperties: false
+          description: API-only inbox preparation and optional traffic activation capability.
+          required: [enabled, trafficActivation]
+          properties:
+            enabled:
+              type: boolean
+            trafficActivation:
+              type: boolean
         customerSessions:
           type: object
           additionalProperties: false
@@ -729,6 +1941,49 @@ components:
           properties:
             enabled:
               type: boolean
+        domainVerifications:
+          type: object
+          additionalProperties: false
+          description: Optional on older servers. DNS evidence does not activate traffic.
+          required: [enabled, authentication, trafficActivation]
+          properties:
+            enabled:
+              type: boolean
+            authentication:
+              type: string
+              const: machine_owner
+            trafficActivation:
+              type: boolean
+              const: false
+        usage:
+          type: object
+          additionalProperties: false
+          description: Optional on older servers. Inspection support does not imply scope, an assigned allowance, or traffic readiness.
+          required: [inspection, kind, scope]
+          properties:
+            inspection:
+              type: boolean
+              const: true
+            kind:
+              type: string
+              const: resource_safety
+            scope:
+              type: string
+              const: organization
+        agentCredentials:
+          type: object
+          additionalProperties: false
+          description: Optional on older servers. Enabled discovery does not grant owner authority or credential scopes.
+          required: [enabled, reveal, maximumValidityDays]
+          properties:
+            enabled:
+              type: boolean
+            reveal:
+              type: string
+              const: once
+            maximumValidityDays:
+              type: integer
+              const: 90
         flows:
           type: object
           additionalProperties: false
@@ -864,7 +2119,8 @@ components:
         metering:
           type: object
           additionalProperties: false
-          description: These resource limits are not enforced by this implementation.
+          deprecated: true
+          description: Legacy admission-only placeholders. These do not inspect optional provider enforcement; use /v1/usage for recorded resource counters, not traffic readiness.
           required: [conversations, storage]
           properties:
             conversations:
@@ -873,11 +2129,234 @@ components:
             storage:
               type: string
               const: not_enforced
+    UsageResourceStatus:
+      type: object
+      additionalProperties: false
+      required: [used, limit, remaining, limitReached]
+      properties:
+        used:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: Committed records counted in this UTC period; may exceed a subsequently reduced allowance.
+        limit:
+          type: [integer, "null"]
+          minimum: 0
+          maximum: 100000000
+          description: Assigned provisional ceiling; null means unconfigured, never unlimited.
+        remaining:
+          type: [integer, "null"]
+          minimum: 0
+          maximum: 100000000
+          description: max(0, limit - used), or null when unconfigured. Not permission to write.
+        limitReached:
+          type: [boolean, "null"]
+          description: used >= limit, or null when unconfigured. Zero allowance is reached even at zero usage.
+    UsageStatus:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          organizationId,
+          kind,
+          aggregation,
+          asOf,
+          period,
+          state,
+          assignmentVersion,
+          policy,
+          resources,
+          writeAdmission,
+          nextActions,
+        ]
+      properties:
+        organizationId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          const: resource_safety
+        aggregation:
+          type: string
+          const: organization_single_cell
+        asOf:
+          type: string
+          format: date-time
+          description: Database statement time for this single committed snapshot.
+        period:
+          type: object
+          additionalProperties: false
+          required: [startsAt, endsAt, timezone]
+          properties:
+            startsAt:
+              type: string
+              format: date-time
+              description: Inclusive first day of the current UTC calendar month.
+            endsAt:
+              type: string
+              format: date-time
+              description: Exclusive first day of the next UTC month, not a retry guarantee.
+            timezone:
+              type: string
+              const: UTC
+        state:
+          type: string
+          enum: [unconfigured, active, paused]
+        assignmentVersion:
+          type: [integer, "null"]
+          minimum: 1
+          maximum: 9007199254740991
+        policy:
+          anyOf:
+            - type: object
+              additionalProperties: false
+              required: [version, provisional]
+              properties:
+                version:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                provisional:
+                  type: boolean
+                  const: true
+            - type: "null"
+        resources:
+          type: object
+          additionalProperties: false
+          required: [contactRecords, conversationRecords, messageRecords]
+          properties:
+            contactRecords:
+              $ref: "#/components/schemas/UsageResourceStatus"
+            conversationRecords:
+              $ref: "#/components/schemas/UsageResourceStatus"
+            messageRecords:
+              $ref: "#/components/schemas/UsageResourceStatus"
+        writeAdmission:
+          type: string
+          const: not_evaluated
+        nextActions:
+          type: array
+          items:
+            type: string
+          description: Recovery hints for people and agents; never automatic authority to mutate policy.
+    DomainVerificationInput:
+      type: object
+      additionalProperties: false
+      required: [origin]
+      properties:
+        origin:
+          type: string
+          maxLength: 2048
+          pattern: '^https://[^/?#@\s\\*;,]+$'
+          description: Exact canonical HTTPS origin; no path, query, fragment, wildcard, credentials, or IP literal.
+    EmptyObject:
+      type: object
+      additionalProperties: false
+    ApiInboxActivation:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          activationId,
+          tenantId,
+          channelId,
+          intent,
+          state,
+          createdAt,
+          revokedAt,
+          replayed,
+        ]
+      properties:
+        activationId:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        channelId:
+          type: string
+          format: uuid
+        intent:
+          type: string
+          minLength: 16
+          maxLength: 128
+          pattern: "^[A-Za-z0-9._:-]{16,128}$"
+        state:
+          type: string
+          enum: [active, revoked]
+        createdAt:
+          type: integer
+          format: int64
+          minimum: 0
+        revokedAt:
+          type: [integer, "null"]
+          format: int64
+          minimum: 0
+        replayed:
+          type: boolean
+    DomainVerificationDns:
+      type: object
+      additionalProperties: false
+      required: [type, name, value]
+      properties:
+        type:
+          type: string
+          const: TXT
+        name:
+          type: string
+          minLength: 1
+          maxLength: 253
+        value:
+          type: string
+          minLength: 1
+          maxLength: 4096
+    DomainVerification:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          challengeId,
+          tenantId,
+          origin,
+          state,
+          dns,
+          expiresAt,
+          verifiedAt,
+          revokedAt,
+        ]
+      properties:
+        challengeId:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        origin:
+          type: string
+          maxLength: 2048
+          pattern: '^https://[^/?#@\s\\*;,]+$'
+        state:
+          type: string
+          enum: [pending, verified, expired, revoked]
+        dns:
+          $ref: "#/components/schemas/DomainVerificationDns"
+        expiresAt:
+          type: integer
+          format: int64
+          minimum: 0
+        verifiedAt:
+          type: [integer, "null"]
+          format: int64
+          minimum: 0
+        revokedAt:
+          type: [integer, "null"]
+          format: int64
+          minimum: 0
     TenantSpec:
       type: object
       # Returned inside Tenant and TenantPlan, so it stays open for older clients.
       additionalProperties: true
-      required: [name, slug, locale, administrator]
+      required: [name, slug, locale]
       properties:
         name:
           type: string
@@ -900,7 +2379,12 @@ components:
           type: string
           format: email
           maxLength: 254
+        website:
+          $ref: "#/components/schemas/WebsiteInboxSpec"
+        inbox:
+          $ref: "#/components/schemas/ApiInboxSpec"
         administrator:
+          description: Optional legacy contact metadata; it does not establish ownership or access.
           type: object
           additionalProperties: false
           required: [name, email]
@@ -913,6 +2397,122 @@ components:
               type: string
               format: email
               maxLength: 254
+      not:
+        properties:
+          website: {}
+          inbox: {}
+        required: [website, inbox]
+    WebsiteInboxSpec:
+      type: object
+      additionalProperties: false
+      required: [websiteUrl]
+      description: |
+        Exact HTTPS root URLs only; the scheme must be lowercase https. No
+        credentials, query, fragment, path, whitespace, delimiter or wildcard.
+        Hostnames must be valid DNS names or IP literals. The server normalizes default ports, host case and a trailing
+        slash. allowedOrigins defaults to the website origin; when supplied it
+        must include that origin and contain no duplicates after normalization.
+        Origins are returned in sorted canonical form. Domain settings are
+        not a substitute for signed customer identity or server authorization.
+      properties:
+        websiteUrl:
+          type: string
+          format: uri
+          maxLength: 2048
+          pattern: '^https://[^/?#@\s\\*;,]+/?$'
+        allowedOrigins:
+          type: array
+          minItems: 1
+          maxItems: 10
+          uniqueItems: true
+          items:
+            type: string
+            format: uri
+            maxLength: 2048
+            pattern: '^https://[^/?#@\s\\*;,]+/?$'
+    ApiInboxSpec:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          type: string
+          const: api
+    WebsiteChannel:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          organizationId,
+          tenantId,
+          spec,
+          state,
+          trafficEnabled,
+          version,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        spec:
+          $ref: "#/components/schemas/WebsiteInboxSpec"
+        state:
+          type: string
+          description: Extensible observed state. Current values are provisioning, prepared, and degraded. Treat unknown states as not ready; always inspect trafficEnabled independently.
+          examples: [prepared]
+        trafficEnabled:
+          type: boolean
+          description: False until the complete activation boundary is implemented and verified. A succeeded provisioning operation alone does not make this true.
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    InboxChannel:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          organizationId,
+          tenantId,
+          spec,
+          state,
+          trafficEnabled,
+          version,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        spec:
+          oneOf:
+            - $ref: "#/components/schemas/WebsiteInboxSpec"
+            - $ref: "#/components/schemas/ApiInboxSpec"
+        state:
+          type: string
+          description: Extensible observed state; treat unknown states as not ready.
+        trafficEnabled:
+          type: boolean
+          description: False until the complete activation boundary is implemented and verified. A succeeded provisioning operation alone does not make this true.
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     Tenant:
       type: object
       additionalProperties: false
@@ -1570,6 +3170,21 @@ components:
           $ref: "#/components/schemas/Flow"
         version:
           $ref: "#/components/schemas/FlowVersion"
+    FlowMutationResult:
+      type: object
+      # Response envelope: open so older clients tolerate new fields.
+      additionalProperties: true
+      required: [flow, version, replayed]
+      properties:
+        flow:
+          $ref: "#/components/schemas/Flow"
+        version:
+          $ref: "#/components/schemas/FlowVersion"
+        replayed:
+          type: boolean
+          description: |
+            True when the stored result of an earlier identical request under
+            the same idempotency key was returned and no write was applied.
     CreateFlowInput:
       type: object
       additionalProperties: false
@@ -1608,8 +3223,221 @@ components:
         expectedResourceVersion:
           type: integer
           minimum: 1
-    DaykeeperScope:
+    MachinePublicKey:
+      type: object
+      additionalProperties: false
+      required: [kty, crv, x, y]
+      properties:
+        kty:
+          type: string
+          const: EC
+        crv:
+          type: string
+          const: P-256
+        x:
+          type: string
+          minLength: 43
+          maxLength: 43
+          pattern: "^[A-Za-z0-9_-]{43}$"
+        y:
+          type: string
+          minLength: 43
+          maxLength: 43
+          pattern: "^[A-Za-z0-9_-]{43}$"
+    MachineEnrollmentInput:
+      type: object
+      additionalProperties: false
+      required: [name, idempotencyKey, publicKey]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 120
+        idempotencyKey:
+          type: string
+          minLength: 16
+          maxLength: 128
+          pattern: "^[A-Za-z0-9._:-]{16,128}$"
+        publicKey:
+          $ref: "#/components/schemas/MachinePublicKey"
+    MachineChallenge:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          challengeId,
+          audience,
+          nonce,
+          keyThumbprint,
+          requestHash,
+          createdAt,
+          expiresAt,
+        ]
+      properties:
+        challengeId:
+          type: string
+          format: uuid
+        audience:
+          type: string
+          format: uri
+        nonce:
+          type: string
+          minLength: 43
+          maxLength: 43
+          pattern: "^[A-Za-z0-9_-]{43}$"
+        keyThumbprint:
+          type: string
+          minLength: 43
+          maxLength: 43
+          pattern: "^[A-Za-z0-9_-]{43}$"
+        requestHash:
+          type: string
+          minLength: 64
+          maxLength: 64
+          pattern: "^[0-9a-f]{64}$"
+        createdAt:
+          type: integer
+          minimum: 0
+        expiresAt:
+          type: integer
+          minimum: 0
+    MachineProofInput:
+      type: object
+      additionalProperties: false
+      required: [challengeId, proof]
+      properties:
+        challengeId:
+          type: string
+          format: uuid
+        proof:
+          type: string
+          minLength: 1
+          maxLength: 4096
+    MachineEnrollmentResult:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          ownerId,
+          organizationId,
+          organizationSlug,
+          credentialIssued,
+          credential,
+          replayed,
+          token,
+        ]
+      properties:
+        ownerId:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        organizationSlug:
+          type: string
+        credentialIssued:
+          type: boolean
+        credential:
+          type: object
+          additionalProperties: false
+          required: [id, expiresAt, revokedAt, policyVersion]
+          properties:
+            id:
+              type: string
+              format: uuid
+            expiresAt:
+              type: string
+              format: date-time
+            revokedAt:
+              type: [string, "null"]
+              format: date-time
+            policyVersion:
+              type: string
+              const: machine-onboarding-v1
+        replayed:
+          type: boolean
+        token:
+          type: [string, "null"]
+          pattern: "^dk_machine_[0-9a-f]{32}_[A-Za-z0-9_-]{43}$"
+    MachineRotationInput:
+      type: object
+      additionalProperties: false
+      required: [ownerId, expectedCredentialId, intentId]
+      properties:
+        ownerId:
+          type: string
+          format: uuid
+        expectedCredentialId:
+          type: string
+          format: uuid
+        intentId:
+          type: string
+          format: uuid
+    MachineRotationResult:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          ownerId,
+          organizationId,
+          credentialId,
+          predecessorId,
+          intentId,
+          expiresAt,
+          revokedAt,
+          replayed,
+          token,
+        ]
+      properties:
+        ownerId:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        credentialId:
+          type: string
+          format: uuid
+        predecessorId:
+          type: string
+          format: uuid
+        intentId:
+          type: string
+          format: uuid
+        expiresAt:
+          type: string
+          format: date-time
+        revokedAt:
+          type: [string, "null"]
+          format: date-time
+        replayed:
+          type: boolean
+        token:
+          type: [string, "null"]
+          pattern: "^dk_machine_[0-9a-f]{32}_[A-Za-z0-9_-]{43}$"
+    MachineCredentialMetadata:
+      type: object
+      additionalProperties: false
+      required: [ownerId, organizationId, credentialId, expiresAt, revokedAt]
+      properties:
+        ownerId:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        credentialId:
+          type: string
+          format: uuid
+        expiresAt:
+          type: string
+          format: date-time
+        revokedAt:
+          type: [string, "null"]
+          format: date-time
+    AgentCredentialScope:
       type: string
+      description: A scope that a human owner may delegate to a headless agent credential.
       enum:
         - daykeeper.accounts:read
         - daykeeper.accounts:write
@@ -1618,9 +3446,136 @@ components:
         - daykeeper.flows:publish
         - daykeeper.provisioning:read
         - daykeeper.provisioning:apply
+        - daykeeper.billing:read
+    AgentCredential:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          organizationId,
+          name,
+          hint,
+          scopes,
+          state,
+          expiresAt,
+          lastUsedAt,
+          revokedAt,
+          createdAt,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+          description: Organization derived from the authenticated owner.
+        name:
+          type: string
+          minLength: 2
+          maxLength: 80
+        hint:
+          type: string
+          pattern: "^dk_agent_[0-9a-f]{8}…[A-Za-z0-9_-]{4}$"
+          description: Bounded display hint; never usable as a bearer credential.
+        scopes:
+          type: array
+          minItems: 1
+          maxItems: 8
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/AgentCredentialScope"
+        state:
+          type: string
+          enum: [active, expired, revoked]
+        expiresAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: [string, "null"]
+          format: date-time
+        revokedAt:
+          type: [string, "null"]
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+    AgentCredentialPage:
+      type: object
+      additionalProperties: false
+      required: [items, hasMore]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/AgentCredential"
+        hasMore:
+          type: boolean
+          description: True when older inactive history was omitted.
+    CreateAgentCredentialInput:
+      type: object
+      additionalProperties: false
+      required: [name, scopes]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 80
+        scopes:
+          type: array
+          minItems: 1
+          maxItems: 8
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/AgentCredentialScope"
+        validityDays:
+          type: integer
+          minimum: 1
+          maximum: 90
+          default: 30
+    CreateAgentCredentialResult:
+      type: object
+      additionalProperties: false
+      description: A fresh result has a token and replayed false; a replay has token null and replayed true.
+      required: [credential, token, replayed]
+      properties:
+        credential:
+          $ref: "#/components/schemas/AgentCredential"
+        token:
+          type: [string, "null"]
+          pattern: "^dk_agent_[0-9a-f]{32}_[A-Za-z0-9_-]{43}$"
+          description: Sensitive bearer token revealed only on the original successful response. Never log or persist it outside a secret manager.
+        replayed:
+          type: boolean
+    RevokeAgentCredentialResult:
+      type: object
+      additionalProperties: false
+      required: [credential, replayed]
+      properties:
+        credential:
+          $ref: "#/components/schemas/AgentCredential"
+        replayed:
+          type: boolean
+    DaykeeperScope:
+      type: string
+      enum:
+        - daykeeper.accounts:read
+        - daykeeper.accounts:write
+        - daykeeper.billing:read
+        - daykeeper.credentials:read
+        - daykeeper.credentials:write
+        - daykeeper.flows:read
+        - daykeeper.flows:write
+        - daykeeper.flows:publish
+        - daykeeper.provisioning:read
+        - daykeeper.provisioning:apply
         - daykeeper.customer-sessions:write
         - daykeeper.lifecycle:write
         - daykeeper.customers:delete
+        - daykeeper.conversations:read
+        - daykeeper.conversations:write
     ErrorDetail:
       type: object
       # Response envelope: open so older clients tolerate new fields.
@@ -1639,6 +3594,13 @@ components:
             type: string
         correlationId:
           type: string
+        outcomeUnknown:
+          type: boolean
+          description: |
+            Optional marker for a dispatched mutation whose response was lost
+            or unavailable. When true, inspect the affected resource before
+            deciding whether to repeat the same request; clients must not
+            automatically retry the write.
         fields:
           type: array
           items:
@@ -1664,6 +3626,34 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/EntitlementStatus"
+    UsageStatusResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/UsageStatus"
+    AgentCredentialPageResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/AgentCredentialPage"
+    CreateAgentCredentialResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/CreateAgentCredentialResult"
+    RevokeAgentCredentialResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/RevokeAgentCredentialResult"
     TenantPlanResponse:
       allOf:
         - $ref: "#/components/schemas/SuccessEnvelope"
@@ -1701,6 +3691,34 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/CustomerSession"
+    WebsiteChannelResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/WebsiteChannel"
+    InboxChannelResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/InboxChannel"
+    DomainVerificationResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/DomainVerification"
+    ApiInboxActivationResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ApiInboxActivation"
     EmailChannelPlanResponse:
       allOf:
         - $ref: "#/components/schemas/SuccessEnvelope"
@@ -1745,6 +3763,13 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/FlowWithVersion"
+    FlowMutationResultResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/FlowMutationResult"
     FlowVersionResponse:
       allOf:
         - $ref: "#/components/schemas/SuccessEnvelope"
@@ -1752,6 +3777,27 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/FlowVersion"
+    OperatorConversationListResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/OperatorConversationList"
+    OperatorConversationMessagesResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/OperatorConversationMessages"
+    OperatorConversationReplyResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/OperatorConversationReply"
     SuccessEnvelope:
       type: object
       additionalProperties: false
