@@ -390,6 +390,25 @@ test("the provisional policy and deprecated admission-only meters retain wire co
   assert.equal(limit.enum, undefined);
 });
 
+test("the entitlement contract accepts canonical paid plans and rejects unknown plans", () => {
+  for (const plan of ["pro", "scale"]) {
+    const document = structuredClone(contract);
+    document.paths["/v1/entitlements"].get.responses["200"].content[
+      "application/json"
+    ].examples.available.value.data.policy.plan = plan;
+    const result = lintDocument(document, `paid-plan-${plan}`);
+    assert.equal(result.status, 0, result.stderr);
+  }
+
+  const document = structuredClone(contract);
+  document.paths["/v1/entitlements"].get.responses["200"].content[
+    "application/json"
+  ].examples.available.value.data.policy.plan = "enterprise";
+  const result = lintDocument(document, "unsupported-entitlement-plan");
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout, /no-invalid-media-type-examples/);
+});
+
 test("usage is an organization-only billing read with no selectors or mutations", () => {
   const path = contract.paths["/v1/usage"];
   assert.deepEqual(Object.keys(path), ["get"]);
