@@ -17,6 +17,12 @@ customer-facing SDK.
 SDKs are generated or contract-tested against tagged specifications from this
 repository. Service implementation types are not a public contract.
 
+Operator conversation replies use `daykeeper.conversations:write` and return
+`201` when accepted. If a reply fails after dispatch, the error may include
+`outcomeUnknown: true`; inspect the conversation and messages before deciding
+whether to repeat the request. Clients must not automatically retry uncertain
+replies.
+
 ## Unreleased entitlement contract
 
 `GET /v1/entitlements` requires `daykeeper.accounts:read` and describes only
