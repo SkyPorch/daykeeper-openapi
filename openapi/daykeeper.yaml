@@ -12,8 +12,8 @@ info:
     name: SkyPorch
     url: https://github.com/SkyPorch/daykeeper-openapi
   license:
-    name: All rights reserved; public license selection pending
-    identifier: LicenseRef-SkyPorch-Proprietary
+    name: Apache License 2.0
+    identifier: Apache-2.0
 servers:
   - url: https://api.daykeeper.example
     description: Placeholder origin; SDK consumers configure their deployed Daykeeper origin.

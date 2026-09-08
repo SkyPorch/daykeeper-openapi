@@ -2,9 +2,28 @@ extends:
   - recommended
 
 rules:
+  info-license: error
   no-server-example.com: off
   operation-4xx-response: error
   operation-operationId: error
   operation-summary: error
   security-defined: error
   spec-strict-refs: error
+  rule/daykeeper-license-name:
+    severity: error
+    message: The license name must match the repository's Apache-2.0 license.
+    subject:
+      type: License
+      property: name
+    assertions:
+      defined: true
+      const: Apache License 2.0
+  rule/daykeeper-license-identifier:
+    severity: error
+    message: The license identifier must match LICENSE and package.json.
+    subject:
+      type: License
+      property: identifier
+    assertions:
+      defined: true
+      const: Apache-2.0
