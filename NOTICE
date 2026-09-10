@@ -1,0 +1,8 @@
+Daykeeper OpenAPI Contracts
+Copyright 2026 SkyPorch
+
+Licensed under the Apache License, Version 2.0. See the LICENSE file.
+
+The descriptions under `openapi/` are the canonical source for the Daykeeper
+SDKs. Downstream SkyPorch SDK repositories vendor tagged copies of these files
+and record the source tag alongside them.
