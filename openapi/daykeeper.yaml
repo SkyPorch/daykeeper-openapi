@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Daykeeper Management API
-  version: 1.2.0
+  version: 1.3.0
   summary: Safe, multi-tenant support administration for people and agents.
   description: |
     Daykeeper owns tenant lifecycle, support-channel provisioning, durable
@@ -44,6 +44,8 @@ tags:
     description: Durable, inspectable provisioning work.
   - name: Flows
     description: Versioned, immutable support-flow management.
+  - name: Workspace claims
+    description: Machine-owner invitations that hand an agent-created workspace to a person as owner.
 security:
   - daykeeperOAuth:
       - daykeeper.accounts:read
@@ -1606,6 +1608,288 @@ paths:
           $ref: "#/components/responses/Error"
         default:
           $ref: "#/components/responses/Error"
+  /v1/workspace-claims:
+    post:
+      operationId: createWorkspaceClaim
+      summary: Create or replay a workspace ownership claim
+      description: |
+        Issues an owner invitation for the authenticated machine owner's own
+        organization and returns the claim together with a single-use token and
+        a console claim URL. Requires a machine-owner credential with
+        daykeeper.accounts:write. Human bearers and delegated agent credentials
+        are rejected with SCOPE_NOT_HELD (403); there is no organization
+        selector.
+
+        Requires an Idempotency-Key header. A fresh application answers 201 with
+        `replayed: false` and reveals `token` and `claimUrl` exactly once. An
+        exact repeat under the same key answers 200 with `replayed: true` and
+        both `token` and `claimUrl` null; no secret can be recovered. Revoke the
+        pending claim and create a new one to reissue a lost URL.
+
+        The two success bodies are separate schemas rather than one loose shape:
+        201 is always `WorkspaceClaimCreated`, with a non-null token and claim
+        URL and `replayed` constrained to false, and 200 is always
+        `WorkspaceClaimReplayed`, with both fields null and `replayed`
+        constrained to true. Neither status ever carries the other's shape, so a
+        client may narrow on the status code alone.
+
+        One pending claim exists per email per organization. A different intent
+        for the same address while a claim is pending is rejected with
+        INVITATION_ALREADY_PENDING (409); an address that already holds a
+        membership is rejected with ALREADY_A_MEMBER (409); an idempotency key
+        already bound to a different address is rejected with
+        IDEMPOTENCY_KEY_REUSED (409); the hourly claim window answers
+        INVITATION_LIMIT_REACHED (429); a malformed address or idempotency key
+        is rejected with INVALID_INPUT (400). A machine owner that no longer
+        holds the organization, or an organization that is not accepting
+        members, is rejected with ORGANIZATION_ACCESS_REQUIRED (403).
+
+        Two different limits answer 429 on these routes. The hourly claim window
+        answers INVITATION_LIMIT_REACHED; the generic per-address and
+        per-principal request limits answer RATE_LIMITED with a Retry-After
+        header. A client should treat either as retryable after the interval.
+
+        Daykeeper sends no email. The claim URL carries the token in its
+        fragment so it never reaches server logs or referrers; it is a secret,
+        it is shown once, and the agent delivers it out of band.
+
+        When a request fails without a usable response its outcome is unknown.
+        Repeat it with the same key and the exact original body to learn what
+        happened; do not retry an uncertain mutation under a new key. The Node
+        SDK surfaces this state as `outcomeUnknown` on the raised error and will
+        not retry it automatically. All responses, including errors, are not
+        cacheable.
+      tags: [Workspace claims]
+      security:
+        - daykeeperMachineOwner: []
+      x-daykeeper-required-scopes: [daykeeper.accounts:write]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkspaceClaimInput"
+            examples:
+              claim:
+                summary: Hand the workspace to a person by address
+                value:
+                  email: gabriel@acme.com
+      responses:
+        "200":
+          description: The exact original request was replayed; the token and claim URL are no longer available.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+            X-Request-Id:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceClaimReplayedResponse"
+              examples:
+                replayed:
+                  summary: Pending claim returned without its secret
+                  value:
+                    data:
+                      claim:
+                        id: 40000000-0000-4000-8000-000000000001
+                        organizationId: 10000000-0000-4000-8000-000000000001
+                        email: gabriel@acme.com
+                        role: owner
+                        state: pending
+                        expiresAt: "2026-09-13T01:00:00Z"
+                        createdAt: "2026-09-10T01:00:00Z"
+                        acceptedAt: null
+                        revokedAt: null
+                      token: null
+                      claimUrl: null
+                      replayed: true
+        "201":
+          description: A claim was created and its token and claim URL are revealed exactly once.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+            X-Request-Id:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceClaimCreatedResponse"
+              examples:
+                created:
+                  summary: Fresh claim with a single-use handoff URL
+                  value:
+                    data:
+                      claim:
+                        id: 40000000-0000-4000-8000-000000000001
+                        organizationId: 10000000-0000-4000-8000-000000000001
+                        email: gabriel@acme.com
+                        role: owner
+                        state: pending
+                        expiresAt: "2026-09-13T01:00:00Z"
+                        createdAt: "2026-09-10T01:00:00Z"
+                        acceptedAt: null
+                        revokedAt: null
+                      token: dk_invite_2Fm4Xr7QpL0aZ9tKcVbNdHsUwEyRjMgTxPnQ1ZoAiCk
+                      claimUrl: https://console.daykeeper.example/claim#token=dk_invite_2Fm4Xr7QpL0aZ9tKcVbNdHsUwEyRjMgTxPnQ1ZoAiCk
+                      replayed: false
+        "400":
+          $ref: "#/components/responses/WorkspaceClaimError"
+          description: The address or the Idempotency-Key header is malformed (INVALID_INPUT).
+        "401":
+          $ref: "#/components/responses/WorkspaceClaimError"
+        "403":
+          $ref: "#/components/responses/WorkspaceClaimError"
+          description: A human bearer or agent credential was used (SCOPE_NOT_HELD), or the machine owner no longer holds this organization (ORGANIZATION_ACCESS_REQUIRED).
+        "409":
+          $ref: "#/components/responses/WorkspaceClaimError"
+          description: |
+            INVITATION_ALREADY_PENDING when a different intent for the same
+            address is already pending, ALREADY_A_MEMBER when the address
+            already holds a membership, or IDEMPOTENCY_KEY_REUSED when the key
+            is already bound to a different address. No write was applied.
+        "429":
+          $ref: "#/components/responses/WorkspaceClaimRateLimited"
+          description: The hourly claim window (INVITATION_LIMIT_REACHED) or the generic request limit (RATE_LIMITED); no write was applied.
+        "503":
+          $ref: "#/components/responses/WorkspaceClaimError"
+          description: The console origin is not configured, so claims are not enabled (FEATURE_UNAVAILABLE).
+        default:
+          $ref: "#/components/responses/WorkspaceClaimError"
+    get:
+      operationId: listWorkspaceClaims
+      summary: List the current organization's workspace claims
+      description: |
+        Requires a machine-owner credential with daykeeper.accounts:read. The
+        organization comes only from the verified machine owner; no
+        organization, pagination, or filter selector is accepted.
+
+        The response returns every pending, accepted and revoked claim for the
+        organization in one page, ordered newest first. Expired claims are
+        hidden: a pending claim past its expiry is not listed, as in the
+        existing invitation list. An accepted or revoked claim stays listed
+        whatever its expiry, so the history of who took the workspace and what
+        was withdrawn is readable. There is no pagination in v1 and the item
+        count is not capped by the contract: the hourly issue limit on creation
+        is what bounds how many claims an organization can accumulate. Tokens
+        and claim URLs are never returned by this read.
+      tags: [Workspace claims]
+      security:
+        - daykeeperMachineOwner: []
+      x-daykeeper-required-scopes: [daykeeper.accounts:read]
+      responses:
+        "200":
+          description: Every pending, accepted and revoked claim for the authenticated organization, expired claims hidden, newest first.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+            X-Request-Id:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceClaimListResponse"
+              examples:
+                pending:
+                  summary: One pending owner claim
+                  value:
+                    data:
+                      items:
+                        - id: 40000000-0000-4000-8000-000000000001
+                          organizationId: 10000000-0000-4000-8000-000000000001
+                          email: gabriel@acme.com
+                          role: owner
+                          state: pending
+                          expiresAt: "2026-09-13T01:00:00Z"
+                          createdAt: "2026-09-10T01:00:00Z"
+                          acceptedAt: null
+                          revokedAt: null
+        "400":
+          $ref: "#/components/responses/WorkspaceClaimError"
+        "401":
+          $ref: "#/components/responses/WorkspaceClaimError"
+        "403":
+          $ref: "#/components/responses/WorkspaceClaimError"
+          description: A human bearer or agent credential was used (SCOPE_NOT_HELD), or the machine owner no longer holds this organization (ORGANIZATION_ACCESS_REQUIRED).
+        "429":
+          $ref: "#/components/responses/WorkspaceClaimRateLimited"
+          description: The generic per-address or per-principal request limit (RATE_LIMITED).
+        "503":
+          $ref: "#/components/responses/WorkspaceClaimError"
+          description: The console origin is not configured, so claims are not enabled (FEATURE_UNAVAILABLE).
+        default:
+          $ref: "#/components/responses/WorkspaceClaimError"
+  "/v1/workspace-claims/{claimId}/revoke":
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceClaimId"
+    post:
+      operationId: revokeWorkspaceClaim
+      summary: Revoke a workspace ownership claim
+      description: |
+        Requires a machine-owner credential with daykeeper.accounts:write and
+        accepts no customer configuration. Revocation invalidates the claim's
+        token and is safe to repeat: a repeat returns the same revoked claim. It
+        never creates, replaces, recovers, or returns a token or claim URL. A
+        claim belonging to another organization is not disclosed.
+      tags: [Workspace claims]
+      security:
+        - daykeeperMachineOwner: []
+      x-daykeeper-required-scopes: [daykeeper.accounts:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmptyObject"
+      responses:
+        "200":
+          description: The claim is revoked, including an idempotent repeat.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+            X-Request-Id:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceClaimResponse"
+              examples:
+                revoked:
+                  summary: The claim after revocation
+                  value:
+                    data:
+                      id: 40000000-0000-4000-8000-000000000001
+                      organizationId: 10000000-0000-4000-8000-000000000001
+                      email: gabriel@acme.com
+                      role: owner
+                      state: revoked
+                      expiresAt: "2026-09-13T01:00:00Z"
+                      createdAt: "2026-09-10T01:00:00Z"
+                      acceptedAt: null
+                      revokedAt: "2026-09-10T02:00:00Z"
+        "400":
+          $ref: "#/components/responses/WorkspaceClaimError"
+        "401":
+          $ref: "#/components/responses/WorkspaceClaimError"
+        "403":
+          $ref: "#/components/responses/WorkspaceClaimError"
+          description: A human bearer or agent credential was used (SCOPE_NOT_HELD), or the machine owner no longer holds this organization (ORGANIZATION_ACCESS_REQUIRED).
+        "404":
+          $ref: "#/components/responses/WorkspaceClaimError"
+          description: No claim with this identifier belongs to the authenticated machine owner (RESOURCE_NOT_FOUND). A claim in another organization is reported the same way rather than disclosed.
+        "409":
+          $ref: "#/components/responses/WorkspaceClaimError"
+          description: The claim was already accepted and cannot be revoked (RESOURCE_STATE_CONFLICT).
+        "429":
+          $ref: "#/components/responses/WorkspaceClaimRateLimited"
+          description: The generic per-address or per-principal request limit (RATE_LIMITED).
+        "503":
+          $ref: "#/components/responses/WorkspaceClaimError"
+          description: The console origin is not configured, so claims are not enabled (FEATURE_UNAVAILABLE).
+        default:
+          $ref: "#/components/responses/WorkspaceClaimError"
 components:
   securitySchemes:
     daykeeperMachineOwner:
@@ -1691,6 +1975,13 @@ components:
         format: uuid
     DomainVerificationId:
       name: verificationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    WorkspaceClaimId:
+      name: claimId
       in: path
       required: true
       schema:
@@ -1795,6 +2086,37 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
     ApiInboxActivationRateLimited:
       description: API inbox activation is bounded; do not retry uncertain writes automatically.
+      headers:
+        Cache-Control:
+          schema: { type: string, const: no-store }
+        Retry-After:
+          schema:
+            type: integer
+            minimum: 1
+        X-Request-Id:
+          schema: { type: string }
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    WorkspaceClaimError:
+      description: Workspace claim error; never cache this response.
+      headers:
+        Cache-Control:
+          schema: { type: string, const: no-store }
+        X-Request-Id:
+          schema: { type: string }
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    WorkspaceClaimRateLimited:
+      description: |
+        Workspace claim creation is bounded by an hourly window, which answers
+        INVITATION_LIMIT_REACHED, and every claim route is also bounded by the
+        generic per-address and per-principal request limits, which answer
+        RATE_LIMITED with Retry-After. Do not retry an uncertain write
+        automatically.
       headers:
         Cache-Control:
           schema: { type: string, const: no-store }
@@ -1984,6 +2306,14 @@ components:
             maximumValidityDays:
               type: integer
               const: 90
+        workspaceClaims:
+          type: boolean
+          description: |
+            Optional on older servers. True when the management API can issue
+            workspace ownership claims. False when the console origin setting is
+            absent, in which case the claim routes answer FEATURE_UNAVAILABLE
+            (503). Absent means the server predates workspace claims. Enabled
+            discovery does not grant machine-owner authority or account scopes.
         flows:
           type: object
           additionalProperties: false
@@ -3577,6 +3907,167 @@ components:
           $ref: "#/components/schemas/AgentCredential"
         replayed:
           type: boolean
+    WorkspaceClaim:
+      type: object
+      additionalProperties: false
+      description: |
+        An owner invitation issued by a machine owner. It reuses the existing
+        invitation lifecycle: single use, email-match on acceptance, and a
+        bounded expiry. Accepting it never demotes the machine owner.
+      required:
+        [
+          id,
+          organizationId,
+          email,
+          role,
+          state,
+          expiresAt,
+          createdAt,
+          acceptedAt,
+          revokedAt,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+          description: Organization derived from the authenticated machine owner.
+        email:
+          type: string
+          minLength: 1
+          maxLength: 254
+          description: Lowercased address that must sign in to accept this claim.
+        role:
+          type: string
+          const: owner
+        state:
+          type: string
+          enum: [pending, accepted, revoked]
+          description: |
+            Expiry is not a state. A pending claim past its expiry is hidden
+            from the list rather than reported; accepted and revoked claims stay
+            listed.
+        expiresAt:
+          type: string
+          format: date-time
+          maxLength: 64
+        createdAt:
+          type: string
+          format: date-time
+          maxLength: 64
+        acceptedAt:
+          type: [string, "null"]
+          format: date-time
+          maxLength: 64
+          description: |
+            When the invited person signed in and took ownership, or null while
+            the claim is pending or revoked. Always present, never omitted.
+        revokedAt:
+          type: [string, "null"]
+          format: date-time
+          maxLength: 64
+          description: |
+            When the claim was revoked, either by the machine owner or by
+            expiry sweeping a stale pending row, or null otherwise. Always
+            present, never omitted.
+    CreateWorkspaceClaimInput:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email:
+          type: string
+          minLength: 1
+          maxLength: 254
+          pattern: "^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$"
+          description: |
+            Lowercased address that must accept the claim. The local part is one
+            or more dot-separated atoms, so a leading, trailing, or doubled dot
+            is rejected; the domain is one or more labels of at most 63
+            characters that neither start nor end with a hyphen, separated by
+            dots, and at least one dot is required. Uppercase is rejected rather
+            than folded so the stored address matches the one that signs in.
+            Daykeeper sends no email; the caller delivers the returned claim URL
+            out of band.
+          examples:
+            - gabriel@acme.com
+            - gabriel+claims@mail.acme.co.uk
+    WorkspaceClaimCreated:
+      type: object
+      additionalProperties: false
+      description: |
+        The result of a fresh application: the claim, its single-use token, and
+        the console claim URL, revealed exactly once. This is the 201 body.
+      required: [claim, token, claimUrl, replayed]
+      properties:
+        claim:
+          $ref: "#/components/schemas/WorkspaceClaim"
+        token:
+          type: string
+          minLength: 1
+          maxLength: 512
+          pattern: "^dk_invite_[A-Za-z0-9_-]+$"
+          description: Sensitive single-use invitation token revealed only on the original successful response. Never log or persist it outside a secret manager.
+        claimUrl:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          pattern: "^https://[^\\s#]+#token=dk_invite_[A-Za-z0-9_-]+$"
+          description: |
+            Sensitive one-time handoff URL built from the console origin. The
+            token is carried in the fragment so it never reaches server logs or
+            referrers. Revealed only on the original successful response.
+        replayed:
+          type: boolean
+          const: false
+    WorkspaceClaimReplayed:
+      type: object
+      additionalProperties: false
+      description: |
+        The result of an exact repeat under the same idempotency key: the
+        pending claim without its secret. This is the 200 body. Revoke the claim
+        and create a new one to reissue a lost URL.
+      required: [claim, token, claimUrl, replayed]
+      properties:
+        claim:
+          $ref: "#/components/schemas/WorkspaceClaim"
+        token:
+          type: "null"
+          description: Always null on a replay; the token was revealed only on the original response and cannot be recovered.
+        claimUrl:
+          type: "null"
+          description: Always null on a replay; the claim URL was revealed only on the original response and cannot be recovered.
+        replayed:
+          type: boolean
+          const: true
+    WorkspaceClaimResult:
+      description: |
+        Either result of a create call, discriminated by `replayed`: a fresh
+        result carries a string token and claim URL with `replayed` false, and a
+        replay carries both fields null with `replayed` true. Responses are
+        status-specific — 201 is always the fresh shape and 200 always the
+        replay — so a client that already knows the status can narrow to one
+        member without inspecting `replayed`.
+      oneOf:
+        - $ref: "#/components/schemas/WorkspaceClaimCreated"
+        - $ref: "#/components/schemas/WorkspaceClaimReplayed"
+    WorkspaceClaimList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          description: |
+            Every pending, accepted and revoked claim for the organization,
+            expired claims hidden, ordered newest first. The list is not
+            paginated in v1 and accepts no cursor, page, or filter selector;
+            the hourly issue limit bounds how many claims an organization can
+            accumulate.
+          items:
+            $ref: "#/components/schemas/WorkspaceClaim"
     DaykeeperScope:
       type: string
       enum:
@@ -3673,6 +4164,45 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/RevokeAgentCredentialResult"
+    WorkspaceClaimResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/WorkspaceClaim"
+    WorkspaceClaimCreatedResponse:
+      description: The 201 envelope. It narrows WorkspaceClaimResultResponse to the fresh member of the union.
+      allOf:
+        - $ref: "#/components/schemas/WorkspaceClaimResultResponse"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: "#/components/schemas/WorkspaceClaimCreated"
+    WorkspaceClaimReplayedResponse:
+      description: The 200 envelope. It narrows WorkspaceClaimResultResponse to the replay member of the union.
+      allOf:
+        - $ref: "#/components/schemas/WorkspaceClaimResultResponse"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: "#/components/schemas/WorkspaceClaimReplayed"
+    WorkspaceClaimResultResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/WorkspaceClaimResult"
+    WorkspaceClaimListResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/WorkspaceClaimList"
     TenantPlanResponse:
       allOf:
         - $ref: "#/components/schemas/SuccessEnvelope"
