@@ -173,6 +173,35 @@ This is not an additive change. It requires input a conforming client did not
 previously send and changes the success status of two operations, so it needs a
 coordinated server and SDK release rather than a routine minor bump.
 
+## Unreleased workspace claims
+
+Contract `1.3.0` adds workspace claims: a machine owner hands an
+agent-created workspace to a person as owner. `POST /v1/workspace-claims`
+requires an `Idempotency-Key` and a machine-owner credential with
+`daykeeper.accounts:write`; human bearers and delegated agent credentials get
+`SCOPE_NOT_HELD` (403). A fresh application answers `201` with
+`replayed: false` and reveals `token` and `claimUrl` exactly once; an exact
+repeat answers `200` with `replayed: true` and both fields `null`. The token
+rides in the URL fragment, so it never reaches server logs or referrers, and
+Daykeeper sends no email: the caller delivers the URL. Never log or persist it.
+
+One pending claim exists per email per organization. A different intent for a
+pending address is `INVITATION_ALREADY_PENDING` (409), an existing member is
+`ALREADY_A_MEMBER` (409), the hourly window is `RATE_LIMITED` (429), and a bad
+address or key is `INVALID_INPUT` (400). `GET /v1/workspace-claims` needs
+`daykeeper.accounts:read` and lists pending and accepted claims without tokens;
+`POST /v1/workspace-claims/{claimId}/revoke` is machine-owner scoped, takes the
+strict empty body, and is safe to repeat. All responses are non-cacheable.
+
+The optional `capabilities.workspaceClaims` boolean reports whether the console
+origin setting is configured; when it is absent the claim routes answer
+`FEATURE_UNAVAILABLE` (503). Older servers omit the field entirely. Accepting a
+claim does not demote the machine owner and does not spend the person's free
+workspace. Under [`VERSIONING.md`](VERSIONING.md) these additive endpoints and
+the optional capability field are a minor bump, so `info.version` moves from
+`1.2.0` to `1.3.0`. This source change publishes no tag, enables no server
+feature, and grants no deployment or SDK release approval.
+
 ## Check and bundle
 
 ```sh
