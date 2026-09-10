@@ -18,6 +18,8 @@ const CLAIM = {
   state: "pending",
   expiresAt: "2026-09-13T01:00:00Z",
   createdAt: "2026-09-10T01:00:00Z",
+  acceptedAt: null,
+  revokedAt: null,
 };
 const TOKEN = `dk_invite_${"A".repeat(43)}`;
 const FRESH = {
@@ -152,6 +154,7 @@ test("creation documents replay, conflict, rate limit, and unavailable claims", 
     /INVITATION_ALREADY_PENDING/,
   );
   assert.match(create.responses["409"].description, /ALREADY_A_MEMBER/);
+  assert.match(create.responses["409"].description, /IDEMPOTENCY_KEY_REUSED/);
   assert.match(create.responses["400"].description, /INVALID_INPUT/);
   assert.match(create.responses["503"].description, /FEATURE_UNAVAILABLE/);
   assert.equal(
@@ -195,11 +198,13 @@ test("claim schemas are strict, owner-only, and reveal the token exactly once", 
     assert.equal(schemas[name].additionalProperties, false);
   }
   assert.deepEqual(schemas.WorkspaceClaim.required.slice().sort(), [
+    "acceptedAt",
     "createdAt",
     "email",
     "expiresAt",
     "id",
     "organizationId",
+    "revokedAt",
     "role",
     "state",
   ]);
@@ -211,6 +216,13 @@ test("claim schemas are strict, owner-only, and reveal the token exactly once", 
   ]);
   assert.equal(schemas.WorkspaceClaim.properties.token, undefined);
   assert.equal(schemas.WorkspaceClaim.properties.claimUrl, undefined);
+  // The lifecycle timestamps are always present and null until they happen, so
+  // a client never has to tell "absent" apart from "has not happened yet".
+  for (const name of ["acceptedAt", "revokedAt"]) {
+    const property = schemas.WorkspaceClaim.properties[name];
+    assert.deepEqual(property.type, ["string", "null"]);
+    assert.equal(property.format, "date-time");
+  }
   assert.deepEqual(schemas.CreateWorkspaceClaimInput.required, ["email"]);
   assert.equal(
     schemas.CreateWorkspaceClaimInput.properties.email.maxLength,
@@ -255,7 +267,8 @@ test("the claim list is unbounded and documents its own ordering", () => {
   assert.equal(items.type, "array");
   assert.equal(items.maxItems, undefined);
   assert.equal(items.minItems, undefined);
-  assert.match(items.description, /pending and accepted/i);
+  assert.match(items.description, /pending, accepted and revoked/i);
+  assert.match(items.description, /expired\s+claims hidden/i);
   assert.match(items.description, /newest first/);
   assert.match(items.description, /hourly/);
   const list = contract.paths["/v1/workspace-claims"].get;
@@ -392,6 +405,52 @@ test("the OpenAPI validator rejects leaked tokens, plaintext URLs, and bad addre
     "noDotInDomain",
     "queryToken",
   ]) {
+    assert.ok(names.has(name), name);
+  }
+});
+
+test("the two limits behind 429 and the authority denials are both documented", () => {
+  // The hourly claim window and the generic request limiter are different
+  // mechanisms with different codes. A client that only knows RATE_LIMITED
+  // would misread the window, and one that only knows INVITATION_LIMIT_REACHED
+  // would misread the limiter, so the contract names both.
+  const create = contract.paths["/v1/workspace-claims"].post;
+  const list = contract.paths["/v1/workspace-claims"].get;
+  const revoke = contract.paths["/v1/workspace-claims/{claimId}/revoke"].post;
+  assert.match(create.description, /INVITATION_LIMIT_REACHED/);
+  assert.match(create.description, /RATE_LIMITED/);
+  assert.match(create.responses["429"].description, /INVITATION_LIMIT_REACHED/);
+  assert.match(create.responses["429"].description, /RATE_LIMITED/);
+  const limited = contract.components.responses.WorkspaceClaimRateLimited;
+  assert.match(limited.description, /INVITATION_LIMIT_REACHED/);
+  assert.match(limited.description, /RATE_LIMITED/);
+  assert.equal(limited.headers["Retry-After"].schema.minimum, 1);
+  for (const operation of [create, list, revoke]) {
+    assert.match(operation.responses["403"].description, /SCOPE_NOT_HELD/);
+    assert.match(
+      operation.responses["403"].description,
+      /ORGANIZATION_ACCESS_REQUIRED/,
+    );
+  }
+  assert.match(create.description, /ORGANIZATION_ACCESS_REQUIRED/);
+  assert.match(revoke.responses["404"].description, /RESOURCE_NOT_FOUND/);
+  assert.match(revoke.responses["409"].description, /RESOURCE_STATE_CONFLICT/);
+});
+
+test("the OpenAPI validator rejects a claim missing a lifecycle timestamp", () => {
+  const document = structuredClone(contract);
+  const { acceptedAt: _accepted, ...withoutAccepted } = CLAIM;
+  const { revokedAt: _revoked, ...withoutRevoked } = CLAIM;
+  document.paths["/v1/workspace-claims"].get.responses["200"].content[
+    "application/json"
+  ].examples = {
+    missingAcceptedAt: { value: { data: { items: [withoutAccepted] } } },
+    missingRevokedAt: { value: { data: { items: [withoutRevoked] } } },
+  };
+  const result = lintDocument(document, "claim-missing-timestamps");
+  assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+  const names = invalidExampleNames(result);
+  for (const name of ["missingAcceptedAt", "missingRevokedAt"]) {
     assert.ok(names.has(name), name);
   }
 });
