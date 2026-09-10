@@ -10,6 +10,24 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 let directory;
 let contract;
 
+const CLAIM = {
+  id: "40000000-0000-4000-8000-000000000001",
+  organizationId: "10000000-0000-4000-8000-000000000001",
+  email: "gabriel@acme.com",
+  role: "owner",
+  state: "pending",
+  expiresAt: "2026-09-13T01:00:00Z",
+  createdAt: "2026-09-10T01:00:00Z",
+};
+const TOKEN = `dk_invite_${"A".repeat(43)}`;
+const FRESH = {
+  claim: CLAIM,
+  token: TOKEN,
+  claimUrl: `https://console.daykeeper.example/claim#token=${TOKEN}`,
+  replayed: false,
+};
+const REPLAY = { claim: CLAIM, token: null, claimUrl: null, replayed: true };
+
 function redocly(args) {
   const result = spawnSync(
     process.execPath,
@@ -35,6 +53,25 @@ function lintDocument(document, name) {
   const filename = path.join(directory, `${name}.json`);
   writeFileSync(filename, JSON.stringify(document));
   return redocly(["lint", filename, "--format", "json"]);
+}
+
+function mediaType(document, status) {
+  return document.paths["/v1/workspace-claims"].post.responses[status].content[
+    "application/json"
+  ];
+}
+
+function invalidExampleNames(result) {
+  const problems = JSON.parse(result.stdout).problems;
+  const names = new Set();
+  for (const problem of problems) {
+    if (problem.ruleId !== "no-invalid-media-type-examples") continue;
+    for (const location of problem.location) {
+      const match = /\/examples\/([^/]+)\/value/.exec(location.pointer);
+      if (match) names.add(match[1]);
+    }
+  }
+  return names;
 }
 
 before(() => {
@@ -102,12 +139,14 @@ test("creation documents replay, conflict, rate limit, and unavailable claims", 
     Object.keys(create.responses).sort(),
     ["200", "201", "400", "401", "403", "409", "429", "503", "default"].sort(),
   );
-  for (const status of ["200", "201"]) {
-    assert.equal(
-      create.responses[status].content["application/json"].schema.$ref,
-      "#/components/schemas/WorkspaceClaimResultResponse",
-    );
-  }
+  assert.equal(
+    create.responses["201"].content["application/json"].schema.$ref,
+    "#/components/schemas/WorkspaceClaimCreatedResponse",
+  );
+  assert.equal(
+    create.responses["200"].content["application/json"].schema.$ref,
+    "#/components/schemas/WorkspaceClaimReplayedResponse",
+  );
   assert.match(
     create.responses["409"].description,
     /INVITATION_ALREADY_PENDING/,
@@ -149,7 +188,8 @@ test("claim schemas are strict, owner-only, and reveal the token exactly once", 
   for (const name of [
     "WorkspaceClaim",
     "CreateWorkspaceClaimInput",
-    "WorkspaceClaimResult",
+    "WorkspaceClaimCreated",
+    "WorkspaceClaimReplayed",
     "WorkspaceClaimList",
   ]) {
     assert.equal(schemas[name].additionalProperties, false);
@@ -176,23 +216,33 @@ test("claim schemas are strict, owner-only, and reveal the token exactly once", 
     schemas.CreateWorkspaceClaimInput.properties.email.maxLength,
     254,
   );
-  assert.deepEqual(schemas.WorkspaceClaimResult.required.slice().sort(), [
-    "claim",
-    "claimUrl",
-    "replayed",
-    "token",
-  ]);
-  for (const field of ["token", "claimUrl"]) {
-    assert.deepEqual(schemas.WorkspaceClaimResult.properties[field].type, [
-      "string",
-      "null",
+
+  for (const name of ["WorkspaceClaimCreated", "WorkspaceClaimReplayed"]) {
+    assert.deepEqual(schemas[name].required.slice().sort(), [
+      "claim",
+      "claimUrl",
+      "replayed",
+      "token",
     ]);
   }
-  assert.match(
-    schemas.WorkspaceClaimResult.properties.claimUrl.pattern,
-    /#token=/,
-  );
-  assert.equal(schemas.WorkspaceClaimList.properties.items.maxItems, 100);
+  const created = schemas.WorkspaceClaimCreated.properties;
+  assert.equal(created.token.type, "string");
+  assert.equal(created.claimUrl.type, "string");
+  assert.equal(created.replayed.const, false);
+  assert.match(created.claimUrl.pattern, /#token=/);
+  assert.match(created.token.pattern, /\^dk_invite_/);
+
+  const replayed = schemas.WorkspaceClaimReplayed.properties;
+  assert.equal(replayed.token.type, "null");
+  assert.equal(replayed.claimUrl.type, "null");
+  assert.equal(replayed.replayed.const, true);
+
+  assert.deepEqual(schemas.WorkspaceClaimResult.oneOf, [
+    { $ref: "#/components/schemas/WorkspaceClaimCreated" },
+    { $ref: "#/components/schemas/WorkspaceClaimReplayed" },
+  ]);
+  assert.equal(schemas.WorkspaceClaimResult.type, undefined);
+
   assert.equal(schemas.Capabilities.properties.workspaceClaims.type, "boolean");
   assert.equal(
     schemas.Capabilities.required.includes("workspaceClaims"),
@@ -200,41 +250,102 @@ test("claim schemas are strict, owner-only, and reveal the token exactly once", 
   );
 });
 
-test("the OpenAPI validator accepts fresh and replayed claim results", () => {
+test("the claim list is unbounded and documents its own ordering", () => {
+  const items = contract.components.schemas.WorkspaceClaimList.properties.items;
+  assert.equal(items.type, "array");
+  assert.equal(items.maxItems, undefined);
+  assert.equal(items.minItems, undefined);
+  assert.match(items.description, /pending and accepted/i);
+  assert.match(items.description, /newest first/);
+  assert.match(items.description, /hourly/);
+  const list = contract.paths["/v1/workspace-claims"].get;
+  assert.match(list.description, /no pagination in\s+v1/);
+  assert.equal(list.parameters, undefined);
+});
+
+test("the email pattern accepts real addresses and rejects malformed ones", () => {
+  const { pattern, maxLength } =
+    contract.components.schemas.CreateWorkspaceClaimInput.properties.email;
+  const expression = new RegExp(pattern);
+  for (const address of [
+    "gabriel@acme.com",
+    "gabriel+claims@mail.acme.co.uk",
+    "a@b.co",
+    "first.last@sub.domain.example",
+    "user!#$%&'*+/=?^_`{|}~-@example.com",
+  ]) {
+    assert.ok(expression.test(address), `expected ${address} to be accepted`);
+    assert.ok(address.length <= maxLength);
+  }
+  for (const address of [
+    ".@.",
+    "user@.example",
+    "User@acme.com",
+    "gabriel.acme.com",
+    ".gabriel@acme.com",
+    "gabriel.@acme.com",
+    "gabriel..b@acme.com",
+    "gabriel@acme",
+    "gabriel@-acme.com",
+    "gabriel@acme-.com",
+    "gabriel@acme.com ",
+    "gabriel@ acme.com",
+    "gabriel@@acme.com",
+  ]) {
+    assert.equal(
+      expression.test(address),
+      false,
+      `expected ${address} to be rejected`,
+    );
+  }
+});
+
+test("the OpenAPI validator accepts a fresh 201 body and a replayed 200 body", () => {
   const document = structuredClone(contract);
-  const response =
-    document.paths["/v1/workspace-claims"].post.responses["201"].content[
-      "application/json"
-    ];
-  const claim = {
-    id: "40000000-0000-4000-8000-000000000001",
-    organizationId: "10000000-0000-4000-8000-000000000001",
-    email: "gabriel@acme.com",
-    role: "owner",
-    state: "pending",
-    expiresAt: "2026-09-13T01:00:00Z",
-    createdAt: "2026-09-10T01:00:00Z",
+  mediaType(document, "201").examples = { fresh: { value: { data: FRESH } } };
+  mediaType(document, "200").examples = {
+    replayed: { value: { data: REPLAY } },
   };
-  const token = `dk_invite_${"A".repeat(43)}`;
-  response.examples = {
-    fresh: {
-      value: {
-        data: {
-          claim,
-          token,
-          claimUrl: `https://console.daykeeper.example/claim#token=${token}`,
-          replayed: false,
-        },
-      },
-    },
-    replayed: {
-      value: {
-        data: { claim, token: null, claimUrl: null, replayed: true },
-      },
-    },
+  document.paths["/v1/workspace-claims"].post.requestBody.content[
+    "application/json"
+  ].examples = {
+    plain: { value: { email: "gabriel@acme.com" } },
+    tagged: { value: { email: "gabriel+claims@mail.acme.co.uk" } },
   };
   const result = lintDocument(document, "claim-valid-examples");
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test("the OpenAPI validator rejects each status carrying the other's body", () => {
+  const document = structuredClone(contract);
+  mediaType(document, "201").examples = {
+    replayShapeUnder201: { value: { data: REPLAY } },
+  };
+  mediaType(document, "200").examples = {
+    freshShapeUnder200: { value: { data: FRESH } },
+  };
+  const result = lintDocument(document, "claim-crossed-examples");
+  assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+  const names = invalidExampleNames(result);
+  for (const name of ["replayShapeUnder201", "freshShapeUnder200"]) {
+    assert.ok(names.has(name), name);
+  }
+});
+
+test("the OpenAPI validator rejects mismatched replayed flags", () => {
+  const document = structuredClone(contract);
+  mediaType(document, "201").examples = {
+    freshFlaggedReplayed: { value: { data: { ...FRESH, replayed: true } } },
+  };
+  mediaType(document, "200").examples = {
+    replayFlaggedFresh: { value: { data: { ...REPLAY, replayed: false } } },
+  };
+  const result = lintDocument(document, "claim-flag-examples");
+  assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+  const names = invalidExampleNames(result);
+  for (const name of ["freshFlaggedReplayed", "replayFlaggedFresh"]) {
+    assert.ok(names.has(name), name);
+  }
 });
 
 test("the OpenAPI validator rejects leaked tokens, plaintext URLs, and bad addresses", () => {
@@ -247,51 +358,40 @@ test("the OpenAPI validator rejects leaked tokens, plaintext URLs, and bad addre
     document.paths["/v1/workspace-claims"].post.requestBody.content[
       "application/json"
     ];
-  const created =
-    document.paths["/v1/workspace-claims"].post.responses["201"].content[
-      "application/json"
-    ];
-  const claim = {
-    id: "40000000-0000-4000-8000-000000000001",
-    organizationId: "10000000-0000-4000-8000-000000000001",
-    email: "gabriel@acme.com",
-    role: "owner",
-    state: "pending",
-    expiresAt: "2026-09-13T01:00:00Z",
-    createdAt: "2026-09-10T01:00:00Z",
-  };
-  const token = `dk_invite_${"A".repeat(43)}`;
   list.examples = {
-    leaked: { value: { data: { items: [{ ...claim, token }] } } },
+    leaked: { value: { data: { items: [{ ...CLAIM, token: TOKEN }] } } },
   };
   create.examples = {
     notAnAddress: { value: { email: "gabriel.acme.com" } },
+    dotsOnly: { value: { email: ".@." } },
+    emptyDomainLabel: { value: { email: "user@.example" } },
+    uppercase: { value: { email: "User@acme.com" } },
+    trailingLocalDot: { value: { email: "gabriel.@acme.com" } },
+    noDotInDomain: { value: { email: "gabriel@acme" } },
   };
-  created.examples = {
+  mediaType(document, "201").examples = {
     queryToken: {
       value: {
         data: {
-          claim,
-          token,
-          claimUrl: `https://console.daykeeper.example/claim?token=${token}`,
-          replayed: false,
+          ...FRESH,
+          claimUrl: `https://console.daykeeper.example/claim?token=${TOKEN}`,
         },
       },
     },
   };
   const result = lintDocument(document, "claim-invalid-examples");
   assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
-  const problems = JSON.parse(result.stdout).problems;
-  for (const name of ["leaked", "notAnAddress", "queryToken"]) {
-    assert.ok(
-      problems.some(
-        (problem) =>
-          problem.ruleId === "no-invalid-media-type-examples" &&
-          problem.location.some((location) =>
-            location.pointer.includes(`/examples/${name}/value`),
-          ),
-      ),
-      name,
-    );
+  const names = invalidExampleNames(result);
+  for (const name of [
+    "leaked",
+    "notAnAddress",
+    "dotsOnly",
+    "emptyDomainLabel",
+    "uppercase",
+    "trailingLocalDot",
+    "noDotInDomain",
+    "queryToken",
+  ]) {
+    assert.ok(names.has(name), name);
   }
 });

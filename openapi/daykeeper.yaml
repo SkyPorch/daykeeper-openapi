@@ -1626,6 +1626,13 @@ paths:
         both `token` and `claimUrl` null; no secret can be recovered. Revoke the
         pending claim and create a new one to reissue a lost URL.
 
+        The two success bodies are separate schemas rather than one loose shape:
+        201 is always `WorkspaceClaimCreated`, with a non-null token and claim
+        URL and `replayed` constrained to false, and 200 is always
+        `WorkspaceClaimReplayed`, with both fields null and `replayed`
+        constrained to true. Neither status ever carries the other's shape, so a
+        client may narrow on the status code alone.
+
         One pending claim exists per email per organization. A different intent
         for the same address while a claim is pending is rejected with
         INVITATION_ALREADY_PENDING (409); an address that already holds a
@@ -1671,7 +1678,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/WorkspaceClaimResultResponse"
+                $ref: "#/components/schemas/WorkspaceClaimReplayedResponse"
               examples:
                 replayed:
                   summary: Pending claim returned without its secret
@@ -1698,7 +1705,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/WorkspaceClaimResultResponse"
+                $ref: "#/components/schemas/WorkspaceClaimCreatedResponse"
               examples:
                 created:
                   summary: Fresh claim with a single-use handoff URL
@@ -1739,17 +1746,21 @@ paths:
       description: |
         Requires a machine-owner credential with daykeeper.accounts:read. The
         organization comes only from the verified machine owner; no
-        organization, pagination, or filter selector is accepted. Pending and
-        accepted claims are returned; expired claims are hidden, as in the
-        existing invitation list. Tokens and claim URLs are never returned by
-        this read.
+        organization, pagination, or filter selector is accepted.
+
+        The response returns every pending and accepted claim for the
+        organization in one page, ordered newest first; expired claims are
+        hidden, as in the existing invitation list. There is no pagination in
+        v1 and the item count is not capped by the contract: the hourly issue
+        limit on creation is what bounds how many claims an organization can
+        accumulate. Tokens and claim URLs are never returned by this read.
       tags: [Workspace claims]
       security:
         - daykeeperMachineOwner: []
       x-daykeeper-required-scopes: [daykeeper.accounts:read]
       responses:
         "200":
-          description: Pending and accepted claims for the authenticated organization.
+          description: Every pending and accepted claim for the authenticated organization, newest first.
           headers:
             Cache-Control:
               schema: { type: string, const: no-store }
@@ -3908,25 +3919,38 @@ components:
           type: string
           minLength: 1
           maxLength: 254
-          pattern: "^[^A-Z@\\s]+@[^A-Z@\\s]+$"
+          pattern: "^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$"
           description: |
-            Lowercased address that must accept the claim. Daykeeper sends no
-            email; the caller delivers the returned claim URL out of band.
-    WorkspaceClaimResult:
+            Lowercased address that must accept the claim. The local part is one
+            or more dot-separated atoms, so a leading, trailing, or doubled dot
+            is rejected; the domain is one or more labels of at most 63
+            characters that neither start nor end with a hyphen, separated by
+            dots, and at least one dot is required. Uppercase is rejected rather
+            than folded so the stored address matches the one that signs in.
+            Daykeeper sends no email; the caller delivers the returned claim URL
+            out of band.
+          examples:
+            - gabriel@acme.com
+            - gabriel+claims@mail.acme.co.uk
+    WorkspaceClaimCreated:
       type: object
       additionalProperties: false
-      description: A fresh result has a token and claim URL with replayed false; a replay has both null and replayed true.
+      description: |
+        The result of a fresh application: the claim, its single-use token, and
+        the console claim URL, revealed exactly once. This is the 201 body.
       required: [claim, token, claimUrl, replayed]
       properties:
         claim:
           $ref: "#/components/schemas/WorkspaceClaim"
         token:
-          type: [string, "null"]
+          type: string
+          minLength: 1
           maxLength: 512
           pattern: "^dk_invite_[A-Za-z0-9_-]+$"
           description: Sensitive single-use invitation token revealed only on the original successful response. Never log or persist it outside a secret manager.
         claimUrl:
-          type: [string, "null"]
+          type: string
+          minLength: 1
           maxLength: 2048
           pattern: "^https://[^\\s#]+#token=dk_invite_[A-Za-z0-9_-]+$"
           description: |
@@ -3935,6 +3959,38 @@ components:
             referrers. Revealed only on the original successful response.
         replayed:
           type: boolean
+          const: false
+    WorkspaceClaimReplayed:
+      type: object
+      additionalProperties: false
+      description: |
+        The result of an exact repeat under the same idempotency key: the
+        pending claim without its secret. This is the 200 body. Revoke the claim
+        and create a new one to reissue a lost URL.
+      required: [claim, token, claimUrl, replayed]
+      properties:
+        claim:
+          $ref: "#/components/schemas/WorkspaceClaim"
+        token:
+          type: "null"
+          description: Always null on a replay; the token was revealed only on the original response and cannot be recovered.
+        claimUrl:
+          type: "null"
+          description: Always null on a replay; the claim URL was revealed only on the original response and cannot be recovered.
+        replayed:
+          type: boolean
+          const: true
+    WorkspaceClaimResult:
+      description: |
+        Either result of a create call, discriminated by `replayed`: a fresh
+        result carries a string token and claim URL with `replayed` false, and a
+        replay carries both fields null with `replayed` true. Responses are
+        status-specific — 201 is always the fresh shape and 200 always the
+        replay — so a client that already knows the status can narrow to one
+        member without inspecting `replayed`.
+      oneOf:
+        - $ref: "#/components/schemas/WorkspaceClaimCreated"
+        - $ref: "#/components/schemas/WorkspaceClaimReplayed"
     WorkspaceClaimList:
       type: object
       additionalProperties: false
@@ -3942,7 +3998,11 @@ components:
       properties:
         items:
           type: array
-          maxItems: 100
+          description: |
+            Every pending and accepted claim for the organization, expired
+            claims hidden, ordered newest first. The list is not paginated in
+            v1 and accepts no cursor, page, or filter selector; the hourly issue
+            limit bounds how many claims an organization can accumulate.
           items:
             $ref: "#/components/schemas/WorkspaceClaim"
     DaykeeperScope:
@@ -4048,6 +4108,24 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/WorkspaceClaim"
+    WorkspaceClaimCreatedResponse:
+      description: The 201 envelope. It narrows WorkspaceClaimResultResponse to the fresh member of the union.
+      allOf:
+        - $ref: "#/components/schemas/WorkspaceClaimResultResponse"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: "#/components/schemas/WorkspaceClaimCreated"
+    WorkspaceClaimReplayedResponse:
+      description: The 200 envelope. It narrows WorkspaceClaimResultResponse to the replay member of the union.
+      allOf:
+        - $ref: "#/components/schemas/WorkspaceClaimResultResponse"
+        - type: object
+          required: [data]
+          properties:
+            data:
+              $ref: "#/components/schemas/WorkspaceClaimReplayed"
     WorkspaceClaimResultResponse:
       allOf:
         - $ref: "#/components/schemas/SuccessEnvelope"

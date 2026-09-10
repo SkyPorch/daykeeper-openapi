@@ -185,11 +185,23 @@ repeat answers `200` with `replayed: true` and both fields `null`. The token
 rides in the URL fragment, so it never reaches server logs or referrers, and
 Daykeeper sends no email: the caller delivers the URL. Never log or persist it.
 
+The two success bodies are separate schemas rather than one loose shape.
+`WorkspaceClaimCreated` is the `201` body: a non-null `token` and `claimUrl`
+with `replayed` fixed to `false`. `WorkspaceClaimReplayed` is the `200` body:
+both fields `null` with `replayed` fixed to `true`. Neither status can carry the
+other's shape. `WorkspaceClaimResult` remains as the `oneOf` of the two, so a
+generated client still has one result type to narrow on `replayed`.
+
 One pending claim exists per email per organization. A different intent for a
 pending address is `INVITATION_ALREADY_PENDING` (409), an existing member is
 `ALREADY_A_MEMBER` (409), the hourly window is `RATE_LIMITED` (429), and a bad
-address or key is `INVALID_INPUT` (400). `GET /v1/workspace-claims` needs
-`daykeeper.accounts:read` and lists pending and accepted claims without tokens;
+address or key is `INVALID_INPUT` (400). `CreateWorkspaceClaimInput.email` is a
+lowercase address: dot-separated local atoms, so no leading, trailing, or
+doubled dot, and a domain of hyphen-safe labels with at least one dot, within
+254 characters. `GET /v1/workspace-claims` needs `daykeeper.accounts:read` and
+returns every pending and accepted claim without tokens, expired hidden, newest
+first. That list is not paginated in v1 and the contract sets no item cap; the
+hourly issue limit is what bounds growth.
 `POST /v1/workspace-claims/{claimId}/revoke` is machine-owner scoped, takes the
 strict empty body, and is safe to repeat. All responses are non-cacheable.
 
