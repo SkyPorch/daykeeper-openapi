@@ -199,8 +199,17 @@ test("agent credentials cannot delegate credential administration", () => {
   );
   assert.equal(
     schemas.CreateAgentCredentialInput.properties.validityDays.maximum,
-    90,
+    365,
   );
+  // Omitted or null issues a credential that lasts until it is revoked.
+  assert.equal(
+    schemas.CreateAgentCredentialInput.properties.validityDays.default,
+    null,
+  );
+  assert.deepEqual(schemas.AgentCredential.properties.expiresAt.type, [
+    "string",
+    "null",
+  ]);
   assert.equal(
     schemas.Capabilities.required.includes("agentCredentials"),
     false,
@@ -237,6 +246,15 @@ test("the OpenAPI validator accepts fresh and replayed reveal-once results", () 
     },
     replayed: {
       value: { data: { credential, token: null, replayed: true } },
+    },
+    withoutExpiry: {
+      value: {
+        data: {
+          credential: { ...credential, expiresAt: null },
+          token: null,
+          replayed: true,
+        },
+      },
     },
   };
   const result = lintDocument(document, "credential-valid-examples");

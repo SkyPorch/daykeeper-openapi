@@ -94,7 +94,7 @@ is unreleased and requires coordinated server and SDK approval.
 
 Hosted OAuth remains the preferred workload identity. For headless environments
 that cannot complete OAuth, a current human organization owner can list, create,
-and revoke bounded, expiring agent credentials. Creation requires an explicit
+and revoke bounded agent credentials. Creation requires an explicit
 idempotency key and returns the bearer token exactly once; an exact replay proves
 the write completed but returns `token: null`. The client must save the fresh
 token in a secret manager or revoke it and create another credential.
@@ -104,6 +104,14 @@ read/write scopes listed by the contract. They cannot administer credentials,
 members, customer erasure, or lifecycle access. List responses are bounded and
 contain metadata only. Creation must never be automatically retried with a new
 idempotency key after an uncertain response.
+
+A credential lasts until it is revoked unless `validityDays` (1 through 365) is
+given, and a credential without an expiry reports `expiresAt: null`. Contract
+`1.4.0` changes that default from 30 days and makes `expiresAt` nullable, so a
+server key in a deployment's environment does not stop working on a date nobody
+is watching. [`VERSIONING.md`](VERSIONING.md) calls a changed default a major
+change. This one ships as a minor bump on purpose: the credential routes are
+still unreleased and no published client depends on the old default.
 
 This contract is unreleased and requires a coordinated server and SDK release.
 It does not enable the server feature flag, publish a package, or make static
