@@ -10,7 +10,11 @@ The canonical, versioned API contracts for Daykeeper:
   service-only and require separately scoped short-lived tokens.
 
 The management API issues those tenant-bound gateway tokens through the
-customer-session exchange. Consuming applications authenticate their own users
+customer-session exchange. Private backend integrations use a Daykeeper server key with explicit scopes
+and a tenant restriction; OAuth is also supported. Keep the key on your server
+and give customer SDKs only short-lived customer-session tokens.
+
+Consuming applications authenticate their own users
 and services first; no Daykeeper administrative credential is accepted by a
 customer-facing SDK.
 

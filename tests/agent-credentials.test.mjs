@@ -186,9 +186,15 @@ test("agent credentials cannot delegate credential administration", () => {
     "daykeeper.flows:read",
     "daykeeper.flows:write",
     "daykeeper.flows:publish",
+    "daykeeper.flows:operate",
     "daykeeper.provisioning:read",
     "daykeeper.provisioning:apply",
     "daykeeper.billing:read",
+    "daykeeper.customer-sessions:write",
+    "daykeeper.conversations:read",
+    "daykeeper.conversations:write",
+    "daykeeper.lifecycle:write",
+    "daykeeper.customers:delete",
   ]);
   assert.equal(delegated.includes("daykeeper.credentials:read"), false);
   assert.equal(delegated.includes("daykeeper.credentials:write"), false);
@@ -311,4 +317,50 @@ test("the OpenAPI validator rejects secret-bearing lists and overbroad input", (
       name,
     );
   }
+});
+
+test("tenant support keys reject workspace administration and unbound lifecycle access", () => {
+  const document = structuredClone(contract);
+  const input =
+    document.paths["/v1/agent-credentials"].post.requestBody.content[
+      "application/json"
+    ];
+  input.examples = {
+    scoped: {
+      value: {
+        name: "Support backend",
+        tenantId: "20000000-0000-4000-8000-000000000001",
+        scopes: [
+          "daykeeper.customer-sessions:write",
+          "daykeeper.lifecycle:write",
+          "daykeeper.customers:delete",
+        ],
+      },
+    },
+  };
+  let result = lintDocument(document, "scoped-valid");
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  input.examples = {
+    unbound: {
+      value: { name: "Support backend", scopes: ["daykeeper.lifecycle:write"] },
+    },
+    broad: {
+      value: {
+        name: "Support backend",
+        tenantId: "20000000-0000-4000-8000-000000000001",
+        scopes: ["daykeeper.accounts:write"],
+      },
+    },
+  };
+  result = lintDocument(document, "scoped-invalid");
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  const problems = JSON.parse(result.stdout).problems;
+  for (const name of ["unbound", "broad"])
+    assert.ok(
+      problems.some(
+        (p) =>
+          p.ruleId === "no-invalid-media-type-examples" &&
+          p.location.some((l) => l.pointer.includes(`/examples/${name}/value`)),
+      ),
+    );
 });
