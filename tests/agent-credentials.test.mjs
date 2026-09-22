@@ -231,6 +231,7 @@ test("the OpenAPI validator accepts fresh and replayed reveal-once results", () 
   const credential = {
     id: "30000000-0000-4000-8000-000000000001",
     organizationId: "10000000-0000-4000-8000-000000000001",
+    tenantId: null,
     name: "Production MCP",
     hint: "dk_agent_30000000…CQkJ",
     scopes: ["daykeeper.accounts:read"],
@@ -280,6 +281,7 @@ test("the OpenAPI validator rejects secret-bearing lists and overbroad input", (
   const credential = {
     id: "30000000-0000-4000-8000-000000000001",
     organizationId: "10000000-0000-4000-8000-000000000001",
+    tenantId: null,
     name: "Production MCP",
     hint: "dk_agent_30000000…CQkJ",
     scopes: ["daykeeper.accounts:read"],

@@ -1215,6 +1215,7 @@ paths:
       tags: [Operator conversations]
       security:
         - daykeeperOAuth: [daykeeper.conversations:read]
+        - daykeeperServerKey: []
       parameters:
         - $ref: "#/components/parameters/TenantId"
       responses:
@@ -1245,6 +1246,7 @@ paths:
       tags: [Operator conversations]
       security:
         - daykeeperOAuth: [daykeeper.conversations:read]
+        - daykeeperServerKey: []
       responses:
         "200":
           description: Bounded conversation messages.
@@ -1268,6 +1270,7 @@ paths:
       tags: [Operator conversations]
       security:
         - daykeeperOAuth: [daykeeper.conversations:write]
+        - daykeeperServerKey: []
       requestBody:
         required: true
         content:
@@ -3823,6 +3826,7 @@ components:
         [
           id,
           organizationId,
+          tenantId,
           name,
           hint,
           scopes,
@@ -3843,7 +3847,7 @@ components:
         tenantId:
           type: [string, "null"]
           format: uuid
-          description: When present, restricts this key to this tenant within its organization. Lifecycle and customer-deletion scopes require tenantId.
+          description: Null for an organization-wide key; otherwise restricts this key to this tenant. Lifecycle and customer-deletion scopes require a tenant binding.
         name:
           type: string
           minLength: 2

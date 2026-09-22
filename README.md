@@ -96,16 +96,18 @@ is unreleased and requires coordinated server and SDK approval.
 
 ## Unreleased agent credentials
 
-Hosted OAuth remains the preferred workload identity. For headless environments
-that cannot complete OAuth, a current human organization owner can list, create,
-and revoke bounded agent credentials. Creation requires an explicit
+Private backends can use native server keys without configuring an OAuth
+application. A current human organization owner can list, create, and revoke
+bounded agent credentials. Creation requires an explicit
 idempotency key and returns the bearer token exactly once; an exact replay proves
 the write completed but returns `token: null`. The client must save the fresh
 token in a secret manager or revoke it and create another credential.
 
-Agent credentials can delegate only account, flow, provisioning, and billing
-read/write scopes listed by the contract. They cannot administer credentials,
-members, customer erasure, or lifecycle access. List responses are bounded and
+Organization-wide credentials can delegate the account, flow, provisioning,
+billing-read, customer-session, and conversation scopes listed by the contract.
+Tenant-bound credentials can delegate only customer-session, lifecycle, and
+customer-erasure access for their selected tenant. Neither kind can administer
+credentials or members. List responses are bounded and
 contain metadata only. Creation must never be automatically retried with a new
 idempotency key after an uncertain response.
 
