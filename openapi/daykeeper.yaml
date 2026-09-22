@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Daykeeper Management API
-  version: 1.4.0
+  version: 1.5.0
   summary: Safe, multi-tenant support administration for people and agents.
   description: |
     Daykeeper owns tenant lifecycle, support-channel provisioning, durable
@@ -311,9 +311,14 @@ paths:
         replay returns the original metadata with `token: null`; no secret can
         be recovered. Do not automatically retry this mutation with a new key.
 
-        The credential expires, cannot administer credentials or members, and
-        can receive only the explicitly selected delegable scopes. Hosted OAuth
-        remains the preferred workload identity.
+        The server key cannot administer credentials or members and receives only
+        explicitly selected scopes held by its owner. An optional tenantId
+        restricts it to one tenant in the owner's organization. Lifecycle and
+        customer-deletion scopes require this restriction. The tenant may be
+        prepared before activation; a key does not enable customer traffic.
+        Keys last until revoked unless an explicit expiry is requested.
+        Server keys are the recommended authentication for a private backend
+        integration; OAuth remains supported.
       tags: [Agent credentials]
       security:
         - daykeeperOAuth:
@@ -589,12 +594,16 @@ paths:
       operationId: createCustomerSession
       summary: Create a short-lived tenant gateway token
       description: |
-        Exchanges the caller's tenant-bound service identity for a token that
+        Exchanges a Daykeeper server key or OAuth service identity for a token that
         can be used only at the customer gateway. Customer context selects
         support presentation and never grants product entitlement. Lifecycle
-        and erasure purposes require their own OAuth scopes.
+        and erasure purposes require daykeeper.lifecycle:write and
+        daykeeper.customers:delete respectively, in addition to
+        daykeeper.customer-sessions:write. A tenant-restricted server key
+        cannot mint a token for another tenant.
       tags: [Customer sessions]
       security:
+        - daykeeperServerKey: []
         - daykeeperOAuth:
             - daykeeper.customer-sessions:write
       requestBody:
@@ -1206,6 +1215,7 @@ paths:
       tags: [Operator conversations]
       security:
         - daykeeperOAuth: [daykeeper.conversations:read]
+        - daykeeperServerKey: []
       parameters:
         - $ref: "#/components/parameters/TenantId"
       responses:
@@ -1236,6 +1246,7 @@ paths:
       tags: [Operator conversations]
       security:
         - daykeeperOAuth: [daykeeper.conversations:read]
+        - daykeeperServerKey: []
       responses:
         "200":
           description: Bounded conversation messages.
@@ -1259,6 +1270,7 @@ paths:
       tags: [Operator conversations]
       security:
         - daykeeperOAuth: [daykeeper.conversations:write]
+        - daykeeperServerKey: []
       requestBody:
         required: true
         content:
@@ -1892,6 +1904,11 @@ paths:
           $ref: "#/components/responses/WorkspaceClaimError"
 components:
   securitySchemes:
+    daykeeperServerKey:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: Reveal-once Daykeeper server key (dk_agent_ prefix), held only on the backend. Enforces its organization, optional tenant restriction, granted scopes, expiry and revocation. Never use in customer SDKs.
     daykeeperMachineOwner:
       type: http
       scheme: bearer
@@ -3786,16 +3803,22 @@ components:
           format: date-time
     AgentCredentialScope:
       type: string
-      description: A scope that a human owner may delegate to a headless agent credential.
+      description: A scope that a human owner may delegate to a server key.
       enum:
         - daykeeper.accounts:read
         - daykeeper.accounts:write
         - daykeeper.flows:read
         - daykeeper.flows:write
         - daykeeper.flows:publish
+        - daykeeper.flows:operate
         - daykeeper.provisioning:read
         - daykeeper.provisioning:apply
         - daykeeper.billing:read
+        - daykeeper.customer-sessions:write
+        - daykeeper.conversations:read
+        - daykeeper.conversations:write
+        - daykeeper.lifecycle:write
+        - daykeeper.customers:delete
     AgentCredential:
       type: object
       additionalProperties: false
@@ -3803,6 +3826,7 @@ components:
         [
           id,
           organizationId,
+          tenantId,
           name,
           hint,
           scopes,
@@ -3820,6 +3844,10 @@ components:
           type: string
           format: uuid
           description: Organization derived from the authenticated owner.
+        tenantId:
+          type: [string, "null"]
+          format: uuid
+          description: Null for an organization-wide key; otherwise restricts this key to this tenant. Lifecycle and customer-deletion scopes require a tenant binding.
         name:
           type: string
           minLength: 2
@@ -3831,7 +3859,7 @@ components:
         scopes:
           type: array
           minItems: 1
-          maxItems: 8
+          maxItems: 14
           uniqueItems: true
           items:
             $ref: "#/components/schemas/AgentCredentialScope"
@@ -3868,7 +3896,40 @@ components:
       type: object
       additionalProperties: false
       required: [name, scopes]
+      allOf:
+        - if:
+            additionalProperties: true
+            properties:
+              scopes:
+                contains:
+                  enum: [daykeeper.lifecycle:write, daykeeper.customers:delete]
+            required: [scopes]
+          then:
+            additionalProperties: true
+            properties:
+              tenantId: { type: string, format: uuid }
+            required: [tenantId]
+        - if:
+            additionalProperties: true
+            properties:
+              tenantId: { type: string, format: uuid }
+            required: [tenantId]
+          then:
+            additionalProperties: true
+            properties:
+              scopes:
+                items:
+                  enum:
+                    [
+                      daykeeper.customer-sessions:write,
+                      daykeeper.lifecycle:write,
+                      daykeeper.customers:delete,
+                    ]
       properties:
+        tenantId:
+          type: string
+          format: uuid
+          description: When present, restricts this key to this tenant within its organization. Lifecycle and customer-deletion scopes require tenantId.
         name:
           type: string
           minLength: 2
@@ -3876,7 +3937,7 @@ components:
         scopes:
           type: array
           minItems: 1
-          maxItems: 8
+          maxItems: 14
           uniqueItems: true
           items:
             $ref: "#/components/schemas/AgentCredentialScope"
