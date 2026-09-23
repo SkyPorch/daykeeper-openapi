@@ -123,8 +123,11 @@ Contract `1.6.0` adds rotation: `POST
 /v1/agent-credentials/{agentCredentialId}/rotate` issues a new secret with the
 same name, scopes and tenant restriction, and keeps the old one working for
 `overlapHours` (default 24, at most 168; 0 revokes it at once). An owner, or
-the key itself, may rotate it, and a key is rotated at most once. The call
-takes an `Idempotency-Key` and reveals the new token once, like creation.
+the key itself, may rotate it. A key rotating itself never gets a later
+expiry than it had, revoking a key revokes what it rotated itself into, and a
+key that lost its rotation response may supersede the successor it never used.
+The call takes an `Idempotency-Key` and reveals the new token once, like
+creation.
 `AgentCredential` gains optional `rotatedFromId`, `replacedById` and
 `replacedAt`, capabilities gain an optional `agentCredentials.rotation`, and a
 server-key response carries `Daykeeper-Credential-Expires-At` when that key

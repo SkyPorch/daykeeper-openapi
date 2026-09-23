@@ -381,7 +381,9 @@ test("rotation is owner- or self-authorized, idempotent, bounded and reveal-once
     { $ref: "#/components/parameters/IdempotencyKey" },
   ]);
   assert.match(rotate.post.description, /can rotate only itself/);
-  assert.match(rotate.post.description, /Do not automatically retry/);
+  assert.match(rotate.post.description, /never gets a later expiry/);
+  assert.match(rotate.post.description, /revokes every key it produced/);
+  assert.match(rotate.post.description, /successor it never used/);
   for (const status of ["200", "201"])
     assert.equal(
       rotate.post.responses[status].headers["Cache-Control"].schema.const,
@@ -394,7 +396,8 @@ test("rotation is owner- or self-authorized, idempotent, bounded and reveal-once
   assert.equal(input.properties.overlapHours.default, 24);
   assert.equal(input.properties.overlapHours.minimum, 0);
   assert.equal(input.properties.overlapHours.maximum, 168);
-  assert.equal(input.properties.validityDays.default, null);
+  // Omitted keeps the rotated key's policy, so there is no default.
+  assert.equal(input.properties.validityDays.default, undefined);
   assert.equal(input.properties.validityDays.maximum, 365);
   assert.deepEqual(schemas.RotateAgentCredentialResult.required, [
     "credential",

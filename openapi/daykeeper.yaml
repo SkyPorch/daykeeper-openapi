@@ -384,8 +384,9 @@ paths:
       description: |
         Requires a current human organization owner and
         daykeeper.credentials:write. Revocation atomically disables the
-        underlying principal grant and is safe to repeat. It never creates,
-        replaces, recovers, or returns a secret.
+        underlying principal grant and is safe to repeat. It also revokes every
+        key this one produced by rotating itself. It never creates, replaces,
+        recovers, or returns a secret.
       tags: [Agent credentials]
       security:
         - daykeeperOAuth:
@@ -440,17 +441,28 @@ paths:
         The previous key keeps working for `overlapHours` (default 24, at most
         168) so a deployment can switch to the new secret without an outage,
         and never longer than its own expiry. `overlapHours: 0` revokes it at
-        once. The new key lasts until it is revoked unless `validityDays` is
-        given, exactly as for a new key. A key is rotated at most once: rotating
-        a revoked key, or one that was already replaced, answers
-        RESOURCE_STATE_CONFLICT.
+        once.
 
-        The same Idempotency-Key may be submitted again only with the exact
-        original body to reconcile an uncertain response. A replay returns the
-        original metadata with `token: null`; the secret cannot be recovered.
-        Do not automatically retry with a new key: a second rotation of the
-        same credential is refused, so an uncertain first attempt must be
-        reconciled with its original key.
+        Lifetime: `validityDays` omitted keeps the rotated key's policy (a key
+        that never expires, or one issued before agent credentials stopped
+        expiring by default, gets a key that lasts until revoked; otherwise the
+        same lifetime again); `null` lasts until revoked; a number is days. A
+        server key rotating itself never gets a later expiry than it already
+        had, whatever it asks for.
+
+        Revoking a key also revokes every key it produced by rotating itself.
+        Rotations are limited per organization (with the same 25 unexpired-key
+        ceiling as creation, counting keys still in an overlap), and a chain of
+        keys rotating themselves may rotate at most 5 times a day.
+
+        An owner rotates a key once: rotating a revoked or already replaced key
+        answers RESOURCE_STATE_CONFLICT. The same Idempotency-Key may be
+        submitted again only with the exact original body; a replay returns the
+        original metadata with `token: null` and the secret cannot be
+        recovered. A server key that rotated itself and lost the response may,
+        while it still works, call rotate again with a new Idempotency-Key: the
+        successor it never used is revoked and a fresh one is issued. A
+        successor that has already been used is never replaced this way.
 
         Responses to a server-key request carry
         `Daykeeper-Credential-Expires-At` when that key expires within 14
@@ -4090,8 +4102,7 @@ components:
           type: [integer, "null"]
           minimum: 1
           maximum: 365
-          default: null
-          description: Days until the new credential expires. Omitted or null, the default, issues a credential that lasts until it is revoked.
+          description: Days until the new credential expires; null lasts until it is revoked. Omitted keeps the rotated key's policy. A server key rotating itself is capped at its own current expiry.
     RotateAgentCredentialResult:
       type: object
       additionalProperties: false
