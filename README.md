@@ -119,6 +119,35 @@ is watching. [`VERSIONING.md`](VERSIONING.md) calls a changed default a major
 change. This one ships as a minor bump on purpose: the credential routes are
 still unreleased and no published client depends on the old default.
 
+Contract `1.6.0` adds rotation: `POST
+/v1/agent-credentials/{agentCredentialId}/rotate` issues a new secret with the
+same name, scopes and tenant restriction, and keeps the old one working for
+`overlapHours` (default 24, at most 168; 0 revokes it at once). An owner, or
+the key itself, may rotate it. A key rotating itself never gets a later
+expiry than it had, revoking a key revokes what it rotated itself into, and a
+key that lost its rotation response may supersede the successor it never used.
+The call takes an `Idempotency-Key` and reveals the new token once, like
+creation.
+`AgentCredential` gains optional `rotatedFromId`, `replacedById` and
+`replacedAt`, capabilities gain an optional `agentCredentials.rotation`, and a
+server-key response carries `Daykeeper-Credential-Expires-At` when that key
+expires within 14 days, declared as the reusable
+`DaykeeperCredentialExpiresAt` header on every server-key operation and on
+errors. Every addition is optional, so this is a minor bump.
+A server key rotating itself must not pass `overlapHours: 0`: it revokes the
+caller at once, so a lost response leaves the agent no way to recover. Deployed
+servers still accept it, and a server may start rejecting it with
+`INVALID_INPUT`.
+The agent credential response objects (`AgentCredential`, its page, the create,
+revoke and rotate results, and `capabilities.agentCredentials`) now set
+`additionalProperties: true`, as `VERSIONING.md` requires of response schemas,
+so a client generated from `1.6.0` decodes fields a later minor version adds.
+`AgentCredential` still forbids `token` and `tokenHash`. Clients generated from
+`1.4.0` or earlier, where these objects were closed, already reject the
+deployed server's `tenantId` and lineage fields and should regenerate.
+`AgentCredential.tenantId` is optional again: servers before tenant-scoped keys
+omit it, and absent means organization-wide.
+
 This contract is unreleased and requires a coordinated server and SDK release.
 It does not enable the server feature flag, publish a package, or make static
 credentials the default onboarding path.
