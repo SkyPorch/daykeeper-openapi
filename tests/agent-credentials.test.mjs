@@ -366,3 +366,101 @@ test("tenant support keys reject workspace administration and unbound lifecycle 
       ),
     );
 });
+
+test("rotation is owner- or self-authorized, idempotent, bounded and reveal-once", () => {
+  const rotate =
+    contract.paths["/v1/agent-credentials/{agentCredentialId}/rotate"];
+  assert.deepEqual(rotate.parameters, [
+    { $ref: "#/components/parameters/AgentCredentialId" },
+  ]);
+  assert.deepEqual(rotate.post.security, [
+    { daykeeperOAuth: ["daykeeper.credentials:write"] },
+    { daykeeperServerKey: [] },
+  ]);
+  assert.deepEqual(rotate.post.parameters, [
+    { $ref: "#/components/parameters/IdempotencyKey" },
+  ]);
+  assert.match(rotate.post.description, /can rotate only itself/);
+  assert.match(rotate.post.description, /Do not automatically retry/);
+  for (const status of ["200", "201"])
+    assert.equal(
+      rotate.post.responses[status].headers["Cache-Control"].schema.const,
+      "no-store",
+    );
+  const schemas = contract.components.schemas;
+  const input = schemas.RotateAgentCredentialInput;
+  assert.equal(input.additionalProperties, false);
+  assert.equal(input.required, undefined);
+  assert.equal(input.properties.overlapHours.default, 24);
+  assert.equal(input.properties.overlapHours.minimum, 0);
+  assert.equal(input.properties.overlapHours.maximum, 168);
+  assert.equal(input.properties.validityDays.default, null);
+  assert.equal(input.properties.validityDays.maximum, 365);
+  assert.deepEqual(schemas.RotateAgentCredentialResult.required, [
+    "credential",
+    "previousCredential",
+    "token",
+    "replayed",
+  ]);
+  // Older servers never emit the lineage fields, so they stay optional.
+  for (const field of ["rotatedFromId", "replacedById", "replacedAt"]) {
+    assert.ok(schemas.AgentCredential.properties[field]);
+    assert.equal(schemas.AgentCredential.required.includes(field), false);
+  }
+});
+
+test("the OpenAPI validator accepts a rotation result and rejects a wide overlap", () => {
+  const document = structuredClone(contract);
+  const route =
+    document.paths["/v1/agent-credentials/{agentCredentialId}/rotate"].post;
+  const previous = {
+    id: "30000000-0000-4000-8000-000000000001",
+    organizationId: "10000000-0000-4000-8000-000000000001",
+    tenantId: null,
+    name: "Production MCP",
+    hint: "dk_agent_30000000…CQkJ",
+    scopes: ["daykeeper.accounts:read"],
+    state: "active",
+    expiresAt: "2026-09-24T00:00:00.000Z",
+    lastUsedAt: null,
+    revokedAt: null,
+    createdAt: "2026-09-01T00:00:00.000Z",
+    rotatedFromId: null,
+    replacedById: "30000000-0000-4000-8000-000000000002",
+    replacedAt: "2026-09-23T00:00:00.000Z",
+  };
+  const credential = {
+    ...previous,
+    id: "30000000-0000-4000-8000-000000000002",
+    hint: "dk_agent_30000000…DQkJ",
+    expiresAt: null,
+    createdAt: "2026-09-23T00:00:00.000Z",
+    rotatedFromId: previous.id,
+    replacedById: null,
+    replacedAt: null,
+  };
+  route.responses["201"].content["application/json"].examples = {
+    fresh: {
+      value: {
+        data: {
+          credential,
+          previousCredential: previous,
+          token: `dk_agent_${credential.id.replaceAll("-", "")}_${"A".repeat(43)}`,
+          replayed: false,
+        },
+      },
+    },
+  };
+  route.requestBody.content["application/json"].examples = {
+    defaults: { value: {} },
+    immediate: { value: { overlapHours: 0, validityDays: 90 } },
+  };
+  const valid = lintDocument(document, "rotation-valid-examples");
+  assert.equal(valid.status, 0, `${valid.stdout}\n${valid.stderr}`);
+
+  route.requestBody.content["application/json"].examples = {
+    tooWide: { value: { overlapHours: 169 } },
+  };
+  const invalid = lintDocument(document, "rotation-invalid-examples");
+  assert.notEqual(invalid.status, 0);
+});

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Daykeeper Management API
-  version: 1.5.0
+  version: 1.6.0
   summary: Safe, multi-tenant support administration for people and agents.
   description: |
     Daykeeper owns tenant lifecycle, support-channel provisioning, durable
@@ -269,8 +269,10 @@ paths:
         active credentials ahead of recent inactive history. `hasMore` reports
         omitted older history. Tokens and token hashes are never returned.
 
-        Hosted OAuth remains the preferred workload identity. This list does
-        not create, renew, recover, rotate, or reactivate a credential.
+        This list does not create, renew, recover, rotate, or reactivate a
+        credential. `expiresAt` is null for a key that lasts until revoked; a
+        key that expires within 14 days needs rotating. `replacedById` is set
+        on a key that was rotated and is only kept working for its overlap.
       tags: [Agent credentials]
       security:
         - daykeeperOAuth:
@@ -416,6 +418,95 @@ paths:
           $ref: "#/components/responses/Error"
           description: Missing credential-write scope or current human owner authority.
         "404":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+          description: Agent credential management is not enabled (FEATURE_UNAVAILABLE).
+        default:
+          $ref: "#/components/responses/Error"
+  "/v1/agent-credentials/{agentCredentialId}/rotate":
+    parameters:
+      - $ref: "#/components/parameters/AgentCredentialId"
+    post:
+      operationId: rotateAgentCredential
+      summary: Replace an agent credential's secret
+      description: |
+        Issues a new server key with the same name, scopes and tenant
+        restriction, and returns its token exactly once. Either a current human
+        organization owner holding daykeeper.credentials:write and every scope
+        the key carries, or the server key itself (authenticated with the key
+        being rotated) may call it. A server key can rotate only itself.
+
+        The previous key keeps working for `overlapHours` (default 24, at most
+        168) so a deployment can switch to the new secret without an outage,
+        and never longer than its own expiry. `overlapHours: 0` revokes it at
+        once. The new key lasts until it is revoked unless `validityDays` is
+        given, exactly as for a new key. A key is rotated at most once: rotating
+        a revoked key, or one that was already replaced, answers
+        RESOURCE_STATE_CONFLICT.
+
+        The same Idempotency-Key may be submitted again only with the exact
+        original body to reconcile an uncertain response. A replay returns the
+        original metadata with `token: null`; the secret cannot be recovered.
+        Do not automatically retry with a new key: a second rotation of the
+        same credential is refused, so an uncertain first attempt must be
+        reconciled with its original key.
+
+        Responses to a server-key request carry
+        `Daykeeper-Credential-Expires-At` when that key expires within 14
+        days, so an agent can rotate before it stops working.
+      tags: [Agent credentials]
+      security:
+        - daykeeperOAuth:
+            - daykeeper.credentials:write
+        - daykeeperServerKey: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RotateAgentCredentialInput"
+      responses:
+        "200":
+          description: The exact original request was replayed; the new secret is no longer available.
+          headers:
+            Cache-Control:
+              description: Reveal-once results must not be cached.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RotateAgentCredentialResponse"
+        "201":
+          description: A replacement credential was created and its secret is revealed exactly once.
+          headers:
+            Cache-Control:
+              description: Reveal-once results must not be cached.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RotateAgentCredentialResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+          description: Not an owner holding the key's scopes, or a server key rotating a different key (ORGANIZATION_ACCESS_REQUIRED).
+        "404":
+          $ref: "#/components/responses/Error"
+          description: No such credential in the caller's organization (RESOURCE_NOT_FOUND).
+        "409":
+          $ref: "#/components/responses/Error"
+          description: The key is revoked or already rotated (RESOURCE_STATE_CONFLICT), the Idempotency-Key was reused for different input (IDEMPOTENCY_KEY_REUSED), or the active credential limit was reached (CREDENTIAL_LIMIT_REACHED).
+        "429":
           $ref: "#/components/responses/Error"
         "503":
           $ref: "#/components/responses/Error"
@@ -1908,7 +1999,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: opaque
-      description: Reveal-once Daykeeper server key (dk_agent_ prefix), held only on the backend. Enforces its organization, optional tenant restriction, granted scopes, expiry and revocation. Never use in customer SDKs.
+      description: Reveal-once Daykeeper server key (dk_agent_ prefix), held only on the backend. Enforces its organization, optional tenant restriction, granted scopes, expiry and revocation. A response to a server-key request carries a Daykeeper-Credential-Expires-At header when the key expires within 14 days. Never use in customer SDKs.
     daykeeperMachineOwner:
       type: http
       scheme: bearer
@@ -1925,7 +2016,7 @@ components:
             daykeeper.accounts:write: Plan organization and tenant changes.
             daykeeper.billing:read: Read organization-wide usage and billing status.
             daykeeper.credentials:read: List organization agent credential metadata.
-            daykeeper.credentials:write: Create and revoke organization agent credentials as a human owner.
+            daykeeper.credentials:write: Create, rotate and revoke organization agent credentials as a human owner.
             daykeeper.flows:read: Read flow metadata and versions.
             daykeeper.flows:write: Create flows and immutable versions.
             daykeeper.flows:publish: Publish reviewed flow versions.
@@ -2323,6 +2414,9 @@ components:
             maximumValidityDays:
               type: integer
               const: 90
+            rotation:
+              type: boolean
+              description: Optional on older servers. True when POST /v1/agent-credentials/{agentCredentialId}/rotate is available.
         workspaceClaims:
           type: boolean
           description: |
@@ -3879,6 +3973,18 @@ components:
         createdAt:
           type: string
           format: date-time
+        rotatedFromId:
+          type: [string, "null"]
+          format: uuid
+          description: Optional on older servers. The credential this one replaced, when it was issued by rotation.
+        replacedById:
+          type: [string, "null"]
+          format: uuid
+          description: Optional on older servers. The credential that replaced this one. A replaced key keeps working only until its `expiresAt`, the end of the rotation overlap.
+        replacedAt:
+          type: [string, "null"]
+          format: date-time
+          description: Optional on older servers. When this credential was rotated.
     AgentCredentialPage:
       type: object
       additionalProperties: false
@@ -3968,6 +4074,38 @@ components:
       properties:
         credential:
           $ref: "#/components/schemas/AgentCredential"
+        replayed:
+          type: boolean
+    RotateAgentCredentialInput:
+      type: object
+      additionalProperties: false
+      properties:
+        overlapHours:
+          type: integer
+          minimum: 0
+          maximum: 168
+          default: 24
+          description: Hours the previous key keeps working, never beyond its own expiry. 0 revokes it at once.
+        validityDays:
+          type: [integer, "null"]
+          minimum: 1
+          maximum: 365
+          default: null
+          description: Days until the new credential expires. Omitted or null, the default, issues a credential that lasts until it is revoked.
+    RotateAgentCredentialResult:
+      type: object
+      additionalProperties: false
+      description: A fresh result has a token and replayed false; a replay has token null and replayed true.
+      required: [credential, previousCredential, token, replayed]
+      properties:
+        credential:
+          $ref: "#/components/schemas/AgentCredential"
+        previousCredential:
+          $ref: "#/components/schemas/AgentCredential"
+        token:
+          type: [string, "null"]
+          pattern: "^dk_agent_[0-9a-f]{32}_[A-Za-z0-9_-]{43}$"
+          description: Sensitive bearer token for the new credential, revealed only on the original successful response. Never log or persist it outside a secret manager.
         replayed:
           type: boolean
     WorkspaceClaim:
@@ -4227,6 +4365,13 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/RevokeAgentCredentialResult"
+    RotateAgentCredentialResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/RotateAgentCredentialResult"
     WorkspaceClaimResponse:
       allOf:
         - $ref: "#/components/schemas/SuccessEnvelope"

@@ -119,6 +119,17 @@ is watching. [`VERSIONING.md`](VERSIONING.md) calls a changed default a major
 change. This one ships as a minor bump on purpose: the credential routes are
 still unreleased and no published client depends on the old default.
 
+Contract `1.6.0` adds rotation: `POST
+/v1/agent-credentials/{agentCredentialId}/rotate` issues a new secret with the
+same name, scopes and tenant restriction, and keeps the old one working for
+`overlapHours` (default 24, at most 168; 0 revokes it at once). An owner, or
+the key itself, may rotate it, and a key is rotated at most once. The call
+takes an `Idempotency-Key` and reveals the new token once, like creation.
+`AgentCredential` gains optional `rotatedFromId`, `replacedById` and
+`replacedAt`, capabilities gain an optional `agentCredentials.rotation`, and a
+server-key response carries `Daykeeper-Credential-Expires-At` when that key
+expires within 14 days. Every addition is optional, so this is a minor bump.
+
 This contract is unreleased and requires a coordinated server and SDK release.
 It does not enable the server feature flag, publish a package, or make static
 credentials the default onboarding path.
