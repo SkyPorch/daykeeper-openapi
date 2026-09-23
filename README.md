@@ -131,7 +131,22 @@ creation.
 `AgentCredential` gains optional `rotatedFromId`, `replacedById` and
 `replacedAt`, capabilities gain an optional `agentCredentials.rotation`, and a
 server-key response carries `Daykeeper-Credential-Expires-At` when that key
-expires within 14 days. Every addition is optional, so this is a minor bump.
+expires within 14 days, declared as the reusable
+`DaykeeperCredentialExpiresAt` header on every server-key operation and on
+errors. Every addition is optional, so this is a minor bump.
+A server key rotating itself must not pass `overlapHours: 0`: it revokes the
+caller at once, so a lost response leaves the agent no way to recover. Deployed
+servers still accept it, and a server may start rejecting it with
+`INVALID_INPUT`.
+The agent credential response objects (`AgentCredential`, its page, the create,
+revoke and rotate results, and `capabilities.agentCredentials`) now set
+`additionalProperties: true`, as `VERSIONING.md` requires of response schemas,
+so a client generated from `1.6.0` decodes fields a later minor version adds.
+`AgentCredential` still forbids `token` and `tokenHash`. Clients generated from
+`1.4.0` or earlier, where these objects were closed, already reject the
+deployed server's `tenantId` and lineage fields and should regenerate.
+`AgentCredential.tenantId` is optional again: servers before tenant-scoped keys
+omit it, and absent means organization-wide.
 
 This contract is unreleased and requires a coordinated server and SDK release.
 It does not enable the server feature flag, publish a package, or make static

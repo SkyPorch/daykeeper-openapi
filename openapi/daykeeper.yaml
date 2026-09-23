@@ -443,6 +443,13 @@ paths:
         and never longer than its own expiry. `overlapHours: 0` revokes it at
         once.
 
+        A server key rotating itself must not send `overlapHours: 0`. It
+        revokes the key making the call, so if the response is lost the agent
+        can neither authenticate a replay nor use the recovery below, and only
+        an owner can issue it a new key. Deployed servers accept it today; a
+        server may reject it with INVALID_INPUT (400). An owner may still use
+        0 to cut a key off at once.
+
         Lifetime: `validityDays` omitted keeps the rotated key's policy (a key
         that never expires, or one issued before agent credentials stopped
         expiring by default, gets a key that lasts until revoked; otherwise the
@@ -489,6 +496,8 @@ paths:
               schema:
                 type: string
                 const: no-store
+            Daykeeper-Credential-Expires-At:
+              $ref: "#/components/headers/DaykeeperCredentialExpiresAt"
           content:
             application/json:
               schema:
@@ -501,12 +510,15 @@ paths:
               schema:
                 type: string
                 const: no-store
+            Daykeeper-Credential-Expires-At:
+              $ref: "#/components/headers/DaykeeperCredentialExpiresAt"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/RotateAgentCredentialResponse"
         "400":
           $ref: "#/components/responses/Error"
+          description: Invalid input or a missing Idempotency-Key (INVALID_INPUT).
         "401":
           $ref: "#/components/responses/Error"
         "403":
@@ -718,6 +730,9 @@ paths:
       responses:
         "201":
           description: A short-lived, audience-bound gateway token.
+          headers:
+            Daykeeper-Credential-Expires-At:
+              $ref: "#/components/headers/DaykeeperCredentialExpiresAt"
           content:
             application/json:
               schema:
@@ -1324,6 +1339,9 @@ paths:
       responses:
         "200":
           description: Bounded tenant conversation list.
+          headers:
+            Daykeeper-Credential-Expires-At:
+              $ref: "#/components/headers/DaykeeperCredentialExpiresAt"
           content:
             application/json:
               schema:
@@ -1353,6 +1371,9 @@ paths:
       responses:
         "200":
           description: Bounded conversation messages.
+          headers:
+            Daykeeper-Credential-Expires-At:
+              $ref: "#/components/headers/DaykeeperCredentialExpiresAt"
           content:
             application/json:
               schema:
@@ -1383,6 +1404,9 @@ paths:
       responses:
         "201":
           description: Reply accepted by the provider.
+          headers:
+            Daykeeper-Credential-Expires-At:
+              $ref: "#/components/headers/DaykeeperCredentialExpiresAt"
           content:
             application/json:
               schema:
@@ -2107,6 +2131,17 @@ components:
       schema:
         type: string
         format: uuid
+  headers:
+    DaykeeperCredentialExpiresAt:
+      description: |
+        Sent only on a response to a request authenticated with a Daykeeper
+        server key that expires within 14 days: the RFC 3339 instant it stops
+        working. Rotate the key before then. Absent for OAuth and machine-owner
+        callers, for a key that lasts until revoked, and on older servers.
+      required: false
+      schema:
+        type: string
+        format: date-time
   responses:
     IdempotencyKeyReused:
       description: |
@@ -2132,6 +2167,8 @@ components:
     Error:
       description: Structured Daykeeper error. Resource denials do not disclose cross-tenant existence.
       headers:
+        Daykeeper-Credential-Expires-At:
+          $ref: "#/components/headers/DaykeeperCredentialExpiresAt"
         X-Request-Id:
           description: Correlation identifier shared with support and audit logs.
           schema:
@@ -2414,8 +2451,8 @@ components:
               const: organization
         agentCredentials:
           type: object
-          additionalProperties: false
-          description: Optional on older servers. Enabled discovery does not grant owner authority or credential scopes.
+          additionalProperties: true
+          description: Optional on older servers. Enabled discovery does not grant owner authority or credential scopes. Open to fields added in later minor versions.
           required: [enabled, reveal, maximumValidityDays]
           properties:
             enabled:
@@ -3927,12 +3964,12 @@ components:
         - daykeeper.customers:delete
     AgentCredential:
       type: object
-      additionalProperties: false
+      additionalProperties: true
+      description: Credential metadata. Open to fields added in later minor versions, but never carries a secret.
       required:
         [
           id,
           organizationId,
-          tenantId,
           name,
           hint,
           scopes,
@@ -3953,7 +3990,7 @@ components:
         tenantId:
           type: [string, "null"]
           format: uuid
-          description: Null for an organization-wide key; otherwise restricts this key to this tenant. Lifecycle and customer-deletion scopes require a tenant binding.
+          description: Null for an organization-wide key; otherwise restricts this key to this tenant. Lifecycle and customer-deletion scopes require a tenant binding. Current servers always send it; servers before tenant-scoped keys omit it, which means organization-wide.
         name:
           type: string
           minLength: 2
@@ -3997,9 +4034,11 @@ components:
           type: [string, "null"]
           format: date-time
           description: Optional on older servers. When this credential was rotated.
+        token: false
+        tokenHash: false
     AgentCredentialPage:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [items, hasMore]
       properties:
         items:
@@ -4067,7 +4106,7 @@ components:
           description: Days until the credential expires. Omitted or null, the default, issues a credential that lasts until it is revoked.
     CreateAgentCredentialResult:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       description: A fresh result has a token and replayed false; a replay has token null and replayed true.
       required: [credential, token, replayed]
       properties:
@@ -4081,7 +4120,7 @@ components:
           type: boolean
     RevokeAgentCredentialResult:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [credential, replayed]
       properties:
         credential:
@@ -4097,7 +4136,7 @@ components:
           minimum: 0
           maximum: 168
           default: 24
-          description: Hours the previous key keeps working, never beyond its own expiry. 0 revokes it at once.
+          description: Hours the previous key keeps working, never beyond its own expiry. 0 revokes it at once. A server key rotating itself must send at least 1, because 0 leaves it no way to recover a lost response; a server may reject 0 from a server key with INVALID_INPUT.
         validityDays:
           type: [integer, "null"]
           minimum: 1
@@ -4105,7 +4144,7 @@ components:
           description: Days until the new credential expires; null lasts until it is revoked. Omitted keeps the rotated key's policy. A server key rotating itself is capped at its own current expiry.
     RotateAgentCredentialResult:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       description: A fresh result has a token and replayed false; a replay has token null and replayed true.
       required: [credential, previousCredential, token, replayed]
       properties:

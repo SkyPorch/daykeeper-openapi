@@ -467,3 +467,120 @@ test("the OpenAPI validator accepts a rotation result and rejects a wide overlap
   const invalid = lintDocument(document, "rotation-invalid-examples");
   assert.notEqual(invalid.status, 0);
 });
+
+test("credential responses stay decodable when a later minor version adds fields", () => {
+  const schemas = contract.components.schemas;
+  // VERSIONING.md: response schemas are open so an older client tolerates new
+  // fields. A credential still never carries its secret.
+  for (const name of [
+    "AgentCredential",
+    "AgentCredentialPage",
+    "CreateAgentCredentialResult",
+    "RevokeAgentCredentialResult",
+    "RotateAgentCredentialResult",
+  ])
+    assert.equal(schemas[name].additionalProperties, true, name);
+  assert.equal(
+    schemas.Capabilities.properties.agentCredentials.additionalProperties,
+    true,
+  );
+  assert.equal(schemas.AgentCredential.properties.token, false);
+  assert.equal(schemas.AgentCredential.properties.tokenHash, false);
+  // Servers before tenant-scoped keys omit tenantId.
+  assert.equal(schemas.AgentCredential.required.includes("tenantId"), false);
+});
+
+test("a newer server's credential fields validate, a secret still does not", () => {
+  const document = structuredClone(contract);
+  const list =
+    document.paths["/v1/agent-credentials"].get.responses["200"].content[
+      "application/json"
+    ];
+  const credential = {
+    id: "30000000-0000-4000-8000-000000000001",
+    organizationId: "10000000-0000-4000-8000-000000000001",
+    name: "Production MCP",
+    hint: "dk_agent_30000000…CQkJ",
+    scopes: ["daykeeper.accounts:read"],
+    state: "active",
+    expiresAt: null,
+    lastUsedAt: null,
+    revokedAt: null,
+    createdAt: "2026-09-01T00:00:00.000Z",
+  };
+  list.examples = {
+    olderServer: { value: { data: { items: [credential], hasMore: false } } },
+    newerServer: {
+      value: {
+        data: {
+          items: [{ ...credential, tenantId: null, laterField: "x" }],
+          hasMore: false,
+          laterField: 1,
+        },
+      },
+    },
+  };
+  let result = lintDocument(document, "credential-open-valid");
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  list.examples = {
+    leakedHash: {
+      value: {
+        data: {
+          items: [{ ...credential, tokenHash: "0".repeat(64) }],
+          hasMore: false,
+        },
+      },
+    },
+  };
+  result = lintDocument(document, "credential-open-invalid");
+  assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+});
+
+test("server-key responses declare the credential-expiry header", () => {
+  const header = "Daykeeper-Credential-Expires-At";
+  const reference = {
+    $ref: "#/components/headers/DaykeeperCredentialExpiresAt",
+  };
+  assert.equal(
+    contract.components.headers.DaykeeperCredentialExpiresAt.schema.format,
+    "date-time",
+  );
+  assert.deepEqual(
+    contract.components.responses.Error.headers[header],
+    reference,
+  );
+  let operations = 0;
+  for (const item of Object.values(contract.paths))
+    for (const operation of Object.values(item)) {
+      if (
+        !operation?.security?.some((requirement) =>
+          Object.hasOwn(requirement, "daykeeperServerKey"),
+        )
+      )
+        continue;
+      operations += 1;
+      for (const [status, response] of Object.entries(operation.responses)) {
+        if (!/^2/.test(status)) continue;
+        assert.deepEqual(
+          response.headers?.[header],
+          reference,
+          `${operation.operationId} ${status}`,
+        );
+      }
+    }
+  assert.equal(operations, 5);
+});
+
+test("a server key is warned off zero-overlap self-rotation", () => {
+  const rotate =
+    contract.paths["/v1/agent-credentials/{agentCredentialId}/rotate"].post;
+  assert.match(
+    rotate.description,
+    /server key rotating itself must not send `overlapHours: 0`/,
+  );
+  assert.match(
+    contract.components.schemas.RotateAgentCredentialInput.properties
+      .overlapHours.description,
+    /must send at least 1/,
+  );
+});
