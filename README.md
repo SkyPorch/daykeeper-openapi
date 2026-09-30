@@ -1,5 +1,7 @@
 # Daykeeper OpenAPI
 
+Learn more about Daykeeper at [mydaykeeper.com](https://www.mydaykeeper.com).
+
 The canonical, versioned API contracts for Daykeeper:
 
 - [`openapi/daykeeper.yaml`](openapi/daykeeper.yaml) is the server-side
