@@ -135,6 +135,13 @@ paths:
         the latest 20 customer-visible messages. `before` returns up to the 20
         customer-visible messages older than that identifier; `after` returns
         up to 20 newer messages. `before` and `after` cannot be combined.
+        Each response's normalized `{ "messages": [...] }` JSON envelope is
+        capped at 786432 UTF-8 bytes, so a page can contain fewer than 20
+        records. `after` pages are the oldest contiguous prefix; continue from
+        the last returned id until an empty page. Initial and `before` pages
+        are the newest contiguous suffix; continue before the oldest returned
+        id until an empty page. A single message that cannot fit returns HTTP
+        413 with `message_too_large`.
         Invalid cursors and combined cursors return HTTP 400.
         To load older history, continue requesting before the oldest loaded
         message until the response is empty; a short non-empty page does not
@@ -171,6 +178,12 @@ paths:
           $ref: "#/components/responses/Error"
         "400":
           $ref: "#/components/responses/Error"
+        "413":
+          description: One normalized message exceeds the customer page byte budget.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerError"
         default:
           $ref: "#/components/responses/Error"
     post:
