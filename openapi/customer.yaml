@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Daykeeper Customer API
-  version: 0.1.0
+  version: 0.2.0
   summary: Customer conversation access through a tenant-safe Daykeeper gateway.
   description: |
     This API is safe for a customer-facing browser when the consuming
@@ -129,16 +129,35 @@ paths:
     get:
       operationId: listCustomerMessages
       summary: List visible messages in a customer conversation
-      description: Private agent notes and activity records are never returned.
+      description: |
+        Private agent notes and activity records are never returned. Results are
+        in ascending message identifier order. With no cursor, the API returns
+        the latest 20 customer-visible messages. `before` returns up to the 20
+        customer-visible messages older than that identifier; `after` returns
+        up to 100 newer messages. `before` and `after` cannot be combined.
+        Invalid cursors and combined cursors return HTTP 400.
+        To load older history, continue requesting before the oldest loaded
+        message until the response is empty; a short non-empty page does not
+        prove that history is exhausted.
       tags: [Conversations]
       parameters:
         - name: after
           in: query
           required: false
-          description: Return messages with a larger monotonic identifier.
+          description: Return up to 100 messages with a larger monotonic identifier.
           schema:
             type: integer
             minimum: 1
+            maximum: 9007199254740991
+        - name: before
+          in: query
+          required: false
+          description: Return up to 20 messages with a smaller monotonic identifier.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 9007199254740991
+      x-daykeeper-mutually-exclusive-parameters: [after, before]
       responses:
         "200":
           description: Visible customer conversation messages.
@@ -147,6 +166,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/MessageList"
         "401":
+          $ref: "#/components/responses/Error"
+        "400":
           $ref: "#/components/responses/Error"
         default:
           $ref: "#/components/responses/Error"
