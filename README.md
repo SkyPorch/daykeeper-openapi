@@ -259,6 +259,29 @@ the optional capability field are a minor bump, so `info.version` moves from
 `1.2.0` to `1.3.0`. This source change publishes no tag, enables no server
 feature, and grants no deployment or SDK release approval.
 
+## Unreleased web messenger
+
+Contract `1.7.0` documents the web-client resource a tenant's web messenger
+boots from. `GET /v1/tenants/{tenantId}/web-client` (`daykeeper.accounts:read`)
+returns the allowed websites, the publishable key, the install snippet and a
+`version`, sent as `ETag`. `PUT` (`daykeeper.accounts:write`) replaces the
+whole setting; the first PUT mints the key and answers `201`, later ones answer
+`200` and keep it. `POST .../web-client/publishable-key:rotate` mints a new key
+and keeps the previous one working for `graceSeconds` (at most seven days).
+The publishable key is a public identifier, not a secret: the Origin check
+against `allowedOrigins` is what keeps other websites out. Check
+`capabilities.webClients` first; `enabled: false` means the routes answer
+`FEATURE_UNAVAILABLE` (409), and `loopbackOrigins` says whether
+`http://localhost` origins are accepted.
+
+A PUT with no precondition is unconditional. A writer that can race another
+sends `If-Match: <version>` to replace only that version, or `If-None-Match: *`
+to create only; either answers `VERSION_CONFLICT` (412) when the stored state
+differs and writes nothing. `If-None-Match: *` is new in `1.7.0` and servers
+before it ignore the header, so a create-only caller should also confirm the
+`201`. The GET, PUT and rotate operations shipped before this contract and are
+documented as deployed; every addition is optional, so this is a minor bump.
+
 ## Check and bundle
 
 ```sh
