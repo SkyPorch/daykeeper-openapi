@@ -144,7 +144,7 @@ test("PUT documents If-Match and create-only If-None-Match with 412", () => {
   assert.equal(ifMatch.required, false);
   const pattern = new RegExp(ifMatch.schema.pattern);
   for (const value of ["3", '"3"', 'W/"3"']) assert.match(value, pattern);
-  for (const value of ["*", "0", '"1", "2"'])
+  for (const value of ["*", "0", '"1", "2"', '3"', '"3', "W/3"])
     assert.doesNotMatch(value, pattern);
   const ifNoneMatch = parameters.WebClientIfNoneMatch;
   assert.equal(ifNoneMatch.name, "If-None-Match");
@@ -169,6 +169,27 @@ test("request bodies are closed, the WebClient response is open", () => {
   assert.equal(input.properties.allowedOrigins.minItems, 1);
   assert.equal(input.properties.allowedOrigins.maxItems, 10);
   assert.equal(input.properties.allowedOrigins.items.maxLength, 2048);
+  // Only real origins validate: https (DNS or IPv6) or loopback http.
+  const origin = new RegExp(input.properties.allowedOrigins.items.pattern);
+  for (const value of [
+    "https://example.test",
+    "https://Shop.Example.test:8443/",
+    "https://[2001:db8::1]",
+    "http://localhost:3000",
+    "http://[::1]",
+  ])
+    assert.match(value, origin);
+  for (const value of [
+    "not an origin",
+    "https://example.test/path",
+    "https://user@example.test",
+    "https://*.example.test",
+    "http://example.test",
+    "https://example.test?x=1",
+  ])
+    assert.doesNotMatch(value, origin);
+  // The documented greeting limit is the schema's limit.
+  assert.equal(input.properties.greeting.maxLength, 280);
   assert.equal(input.properties.accentColor.pattern, "^#[0-9a-fA-F]{6}$");
   const rotate = schemas.RotateWebClientPublishableKeyInput;
   assert.equal(rotate.additionalProperties, false);
