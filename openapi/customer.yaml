@@ -134,17 +134,19 @@ paths:
         in ascending message identifier order. With no cursor, the API returns
         the latest 20 customer-visible messages. `before` returns up to the 20
         customer-visible messages older than that identifier; `after` returns
-        up to 100 newer messages. `before` and `after` cannot be combined.
+        up to 20 newer messages. `before` and `after` cannot be combined.
         Invalid cursors and combined cursors return HTTP 400.
         To load older history, continue requesting before the oldest loaded
         message until the response is empty; a short non-empty page does not
         prove that history is exhausted.
+        To catch up after a high volume of replies, continue requesting after
+        the newest received message until the response is empty.
       tags: [Conversations]
       parameters:
         - name: after
           in: query
           required: false
-          description: Return up to 100 messages with a larger monotonic identifier.
+          description: Return up to 20 messages with a larger monotonic identifier.
           schema:
             type: integer
             minimum: 1
