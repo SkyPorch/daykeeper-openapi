@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Daykeeper Management API
-  version: 1.6.0
+  version: 1.7.0
   summary: Safe, multi-tenant support administration for people and agents.
   description: |
     Daykeeper owns tenant lifecycle, support-channel provisioning, durable
@@ -34,6 +34,8 @@ tags:
     description: Email-domain planning, DNS evidence, and round-trip readiness.
   - name: Website channels
     description: First-inbox preparation and observed installation readiness.
+  - name: Web messenger
+    description: Allowed websites and the publishable key a tenant's web messenger boots with.
   - name: Domain verification
     description: DNS observation and durable domain-proof evidence; never traffic activation.
   - name: API inbox activation
@@ -896,6 +898,242 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
+  "/v1/tenants/{tenantId}/web-client":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      operationId: getWebClient
+      summary: Inspect the tenant's web messenger settings
+      description: |
+        Returns the websites allowed to open the tenant's web messenger, the
+        publishable key the messenger boots with, and the install snippet.
+        Requires daykeeper.accounts:read. A tenant-bound credential can read
+        only its own tenant.
+
+        An unknown tenant, another organization's tenant, and a tenant that has
+        never had a web client all answer RESOURCE_NOT_FOUND (404), so the
+        response does not disclose which. `ETag` carries the current `version`;
+        send it back as `If-Match` on the next PUT.
+      tags: [Web messenger]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:read]
+        - daykeeperServerKey: []
+        - daykeeperMachineOwner: []
+      x-daykeeper-required-scopes: [daykeeper.accounts:read]
+      responses:
+        "200":
+          description: The tenant's web client.
+          headers:
+            ETag:
+              $ref: "#/components/headers/WebClientETag"
+            Cache-Control:
+              schema: { type: string, const: no-store }
+            Daykeeper-Credential-Expires-At:
+              $ref: "#/components/headers/DaykeeperCredentialExpiresAt"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebClientResponse"
+              examples:
+                enabled:
+                  value:
+                    data:
+                      tenantId: "20000000-0000-4000-8000-000000000001"
+                      state: enabled
+                      allowedOrigins:
+                        [https://example.test, https://www.example.test]
+                      publishableKey: dk_pk_AbCdEfGhIjKlMnOpQrStUvWxYz012345
+                      previousKeyExpiresAt: null
+                      greeting: Hi! How can we help?
+                      accentColor: "#336699"
+                      trafficEnabled: true
+                      snippet: |-
+                        <script>window.Daykeeper=window.Daykeeper||function(){(Daykeeper.q=Daykeeper.q||[]).push(arguments)};
+                        Daykeeper('boot',{publishableKey:'dk_pk_AbCdEfGhIjKlMnOpQrStUvWxYz012345'});</script>
+                        <script async src="https://cdn.mydaykeeper.com/messenger/v1/messenger.js"></script>
+                      version: 3
+        "400":
+          $ref: "#/components/responses/Error"
+          description: The tenant id is not a UUID (INVALID_INPUT).
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+          description: The credential lacks daykeeper.accounts:read (SCOPE_REQUIRED).
+        "404":
+          $ref: "#/components/responses/Error"
+          description: No such tenant in the caller's organization, or the tenant has no web client (RESOURCE_NOT_FOUND).
+        "409":
+          $ref: "#/components/responses/Error"
+          description: Web clients are not enabled on this deployment (FEATURE_UNAVAILABLE).
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: putWebClient
+      summary: Create or replace the tenant's web messenger settings
+      description: |
+        Requires daykeeper.accounts:write. A tenant-bound credential can write
+        only its own tenant. The tenant must have an API inbox that is not
+        being deleted.
+
+        The body replaces the whole setting: an omitted `greeting` or
+        `accentColor` is cleared, not kept. The first successful PUT for a
+        tenant mints its publishable key and answers 201; later PUTs answer
+        200 and keep the key (use the rotate operation to change it). A PUT
+        that changes nothing leaves `version` as it was.
+
+        Concurrency. Without a precondition the PUT is unconditional: it
+        creates the web client if there is none and otherwise replaces it,
+        whoever wrote it last. A writer that may race another must send one of:
+        - `If-Match: <version>` (the `ETag` from the last read or write) to
+          replace only that version. A different stored version, or no web
+          client at all, answers VERSION_CONFLICT (412).
+        - `If-None-Match: *` to create only. If a web client already exists
+          the request answers VERSION_CONFLICT (412) and nothing changes; read
+          it and retry with `If-Match`.
+
+        Sending both headers, an `If-None-Match` other than `*`, or a
+        malformed `If-Match` is rejected with INVALID_INPUT (400).
+        `If-None-Match: *` is new in contract 1.7.0; a server that predates it
+        ignores the header, so check that the response status is 201 before
+        relying on it having created the web client.
+
+        Origins are normalized (lowercase host, default port and trailing
+        slash removed), checked for duplicates after normalization, and
+        returned sorted.
+      tags: [Web messenger]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:write]
+        - daykeeperServerKey: []
+        - daykeeperMachineOwner: []
+      x-daykeeper-required-scopes: [daykeeper.accounts:write]
+      parameters:
+        - $ref: "#/components/parameters/WebClientIfMatch"
+        - $ref: "#/components/parameters/WebClientIfNoneMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebClientInput"
+            examples:
+              enabled:
+                value:
+                  state: enabled
+                  allowedOrigins:
+                    [https://www.example.test, https://example.test]
+                  greeting: Hi! How can we help?
+                  accentColor: "#336699"
+      responses:
+        "200":
+          description: The existing web client was replaced (or was already equal); its publishable key is unchanged.
+          headers:
+            ETag:
+              $ref: "#/components/headers/WebClientETag"
+            Cache-Control:
+              schema: { type: string, const: no-store }
+            Daykeeper-Credential-Expires-At:
+              $ref: "#/components/headers/DaykeeperCredentialExpiresAt"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebClientResponse"
+        "201":
+          description: The web client was created and its publishable key minted.
+          headers:
+            ETag:
+              $ref: "#/components/headers/WebClientETag"
+            Cache-Control:
+              schema: { type: string, const: no-store }
+            Daykeeper-Credential-Expires-At:
+              $ref: "#/components/headers/DaykeeperCredentialExpiresAt"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebClientResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+          description: The body, an origin, the greeting or the accent color is invalid, or the If-Match / If-None-Match headers are malformed or sent together (INVALID_INPUT).
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+          description: The credential lacks daykeeper.accounts:write (SCOPE_REQUIRED).
+        "404":
+          $ref: "#/components/responses/Error"
+          description: No such tenant in the caller's organization (RESOURCE_NOT_FOUND).
+        "409":
+          $ref: "#/components/responses/Error"
+          description: The tenant has no API inbox or is being deleted (RESOURCE_STATE_CONFLICT), or web clients are not enabled on this deployment (FEATURE_UNAVAILABLE).
+        "412":
+          $ref: "#/components/responses/Error"
+          description: The If-Match version is not the stored one, If-Match was sent and no web client exists, or If-None-Match is `*` and a web client exists (VERSION_CONFLICT). Nothing was written.
+        default:
+          $ref: "#/components/responses/Error"
+  "/v1/tenants/{tenantId}/web-client/publishable-key:rotate":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    post:
+      operationId: rotateWebClientPublishableKey
+      summary: Replace the web messenger's publishable key
+      description: |
+        Requires daykeeper.accounts:write. Mints a new publishable key and
+        increments `version`. The previous key keeps working for
+        `graceSeconds` (at most 604800, seven days) and its end is reported as
+        `previousKeyExpiresAt`; `graceSeconds: 0` stops it at once. Only one
+        previous key is kept: rotating again during a grace period stops the
+        older previous key at once.
+
+        The key is a public identifier, not a secret: what keeps other
+        websites out is the Origin check against `allowedOrigins`. This
+        operation takes no precondition header and is not idempotent: each
+        call mints a new key.
+      tags: [Web messenger]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:write]
+        - daykeeperServerKey: []
+        - daykeeperMachineOwner: []
+      x-daykeeper-required-scopes: [daykeeper.accounts:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RotateWebClientPublishableKeyInput"
+            examples:
+              oneDayGrace:
+                value:
+                  graceSeconds: 86400
+      responses:
+        "200":
+          description: The web client with its new publishable key.
+          headers:
+            ETag:
+              $ref: "#/components/headers/WebClientETag"
+            Cache-Control:
+              schema: { type: string, const: no-store }
+            Daykeeper-Credential-Expires-At:
+              $ref: "#/components/headers/DaykeeperCredentialExpiresAt"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebClientResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+          description: The body is invalid (INVALID_INPUT).
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+          description: The credential lacks daykeeper.accounts:write (SCOPE_REQUIRED).
+        "404":
+          $ref: "#/components/responses/Error"
+          description: No such tenant in the caller's organization, or the tenant has no web client (RESOURCE_NOT_FOUND).
+        "409":
+          $ref: "#/components/responses/Error"
+          description: The tenant is being deleted (RESOURCE_STATE_CONFLICT), or web clients are not enabled on this deployment (FEATURE_UNAVAILABLE).
+        default:
+          $ref: "#/components/responses/Error"
   "/v1/tenants/{tenantId}/domain-verifications":
     parameters:
       - $ref: "#/components/parameters/TenantId"
@@ -2117,6 +2355,33 @@ components:
       schema:
         type: string
         format: uuid
+    WebClientIfMatch:
+      name: If-Match
+      in: header
+      required: false
+      description: |
+        Replace only this version of the web client: the `version` (as sent in
+        `ETag`) from the last read or write. `3`, `"3"` and `W/"3"` are
+        accepted. A different stored version, or no web client at all, answers
+        VERSION_CONFLICT (412). A malformed value, including `*` or a list of
+        versions, answers INVALID_INPUT (400). Do not combine with
+        If-None-Match.
+      schema:
+        type: string
+        # Exactly the documented forms: bare, quoted, or weak and quoted.
+        pattern: '^(?:[1-9][0-9]{0,15}|"[1-9][0-9]{0,15}"|W/"[1-9][0-9]{0,15}")$'
+    WebClientIfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      description: |
+        `*` creates the web client only if the tenant has none. If one exists
+        the request answers VERSION_CONFLICT (412) and nothing changes. Any
+        other value answers INVALID_INPUT (400). Do not combine with If-Match.
+        New in contract 1.7.0; older servers ignore this header.
+      schema:
+        type: string
+        const: "*"
     DomainVerificationId:
       name: verificationId
       in: path
@@ -2142,6 +2407,12 @@ components:
       schema:
         type: string
         format: date-time
+    WebClientETag:
+      description: The web client's `version` as a quoted strong entity tag, for example `"3"`. Send it back as If-Match.
+      required: true
+      schema:
+        type: string
+        pattern: '^"[1-9][0-9]*"$'
   responses:
     IdempotencyKeyReused:
       description: |
@@ -2474,6 +2745,21 @@ components:
             absent, in which case the claim routes answer FEATURE_UNAVAILABLE
             (503). Absent means the server predates workspace claims. Enabled
             discovery does not grant machine-owner authority or account scopes.
+        webClients:
+          type: object
+          additionalProperties: true
+          description: |
+            Optional on older servers; absent means the server predates web
+            clients. `enabled: false` means the web-client routes answer
+            FEATURE_UNAVAILABLE (409). Open to fields added in later minor
+            versions.
+          required: [enabled, loopbackOrigins]
+          properties:
+            enabled:
+              type: boolean
+            loopbackOrigins:
+              type: boolean
+              description: True when `http://localhost`, `http://127.0.0.1` and `http://[::1]` origins are accepted, for local development.
         flows:
           type: object
           additionalProperties: false
@@ -4422,6 +4708,132 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/RotateAgentCredentialResult"
+    WebClientResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/WebClient"
+    WebClient:
+      type: object
+      # Response envelope: open so older clients tolerate new fields.
+      additionalProperties: true
+      description: |
+        A tenant's web messenger settings: the websites allowed to open its
+        API inbox's web messenger, and the publishable key the messenger boots
+        with.
+      required:
+        [
+          tenantId,
+          state,
+          allowedOrigins,
+          publishableKey,
+          previousKeyExpiresAt,
+          greeting,
+          accentColor,
+          trafficEnabled,
+          snippet,
+          version,
+        ]
+      properties:
+        tenantId:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum: [enabled, disabled]
+        allowedOrigins:
+          type: array
+          minItems: 1
+          maxItems: 10
+          description: Exact, normalized origins, sorted.
+          items:
+            type: string
+        publishableKey:
+          type: string
+          pattern: "^dk_pk_[A-Za-z0-9]{32}$"
+          description: |
+            A public identifier, not a secret: it is embedded in the website's
+            HTML. What stops another website from using it is the Origin check
+            against `allowedOrigins`, made at the visitor-session exchange and at
+            the gateway.
+        previousKeyExpiresAt:
+          type: [string, "null"]
+          format: date-time
+          description: While a rotated-out key still works, when it stops. Null when there is none or it has expired.
+        greeting:
+          type: [string, "null"]
+          description: The messenger's opening line, or null for the default.
+        accentColor:
+          type: [string, "null"]
+          pattern: "^#[0-9a-f]{6}$"
+          description: Lowercase `#rrggbb`, or null for the default.
+        trafficEnabled:
+          type: boolean
+          description: True when `state` is enabled and the tenant's API inbox is live for customer traffic.
+        snippet:
+          type: string
+          description: |
+            The HTML install snippet: it loads
+            https://cdn.mydaykeeper.com/messenger/v1/messenger.js and boots the
+            messenger with `publishableKey`. Paste it into every page of an
+            allowed website.
+        version:
+          type: integer
+          minimum: 1
+          description: Increments on every change, including key rotation. Sent as `ETag`.
+    WebClientInput:
+      type: object
+      additionalProperties: false
+      description: The whole web messenger setting. Omitted optional fields are cleared.
+      required: [state, allowedOrigins]
+      properties:
+        state:
+          type: string
+          enum: [enabled, disabled]
+          description: Disabled keeps the settings and key but turns the messenger off.
+        allowedOrigins:
+          type: array
+          minItems: 1
+          maxItems: 10
+          uniqueItems: true
+          description: |
+            One to ten distinct exact origins, `https://host[:port]`, with no
+            path, query, fragment, credentials or wildcard (a trailing `/` is
+            accepted and removed). `http://localhost`, `http://127.0.0.1` and
+            `http://[::1]` (any port) are accepted only where
+            `capabilities.webClients.loopbackOrigins` is true. Origins that
+            are equal after normalization are duplicates and rejected.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 2048
+            # An https origin (DNS name or bracketed IPv6, optional port), or
+            # a loopback http origin; at most one trailing slash.
+            pattern: '^(?:https://(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*|\[[0-9A-Fa-f:]+\])|http://(?:localhost|127\.0\.0\.1|\[::1\]))(?::[0-9]{1,5})?/?$'
+        greeting:
+          type: string
+          minLength: 1
+          maxLength: 280
+          description: |
+            1 to 280 characters after trimming, with no control characters.
+            Send it already trimmed. A greeting that is empty after trimming is
+            rejected; omit the field to clear it.
+        accentColor:
+          type: string
+          pattern: "^#[0-9a-fA-F]{6}$"
+          description: A `#rrggbb` hex color, stored lowercase.
+    RotateWebClientPublishableKeyInput:
+      type: object
+      additionalProperties: false
+      required: [graceSeconds]
+      properties:
+        graceSeconds:
+          type: integer
+          minimum: 0
+          maximum: 604800
+          description: How long the previous key keeps working. 0 stops it at once; at most 604800 (seven days).
     WorkspaceClaimResponse:
       allOf:
         - $ref: "#/components/schemas/SuccessEnvelope"
