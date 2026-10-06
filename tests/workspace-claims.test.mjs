@@ -249,6 +249,13 @@ test("claim schemas are strict, owner-only, and reveal the token exactly once", 
   assert.equal(replayed.claimUrl.type, "null");
   assert.equal(replayed.replayed.const, true);
 
+  // 1.8.0: `emailed` is optional on both results, so older servers stay
+  // conforming, and a replay never claims to have sent anything.
+  assert.equal(created.emailed.type, "boolean");
+  assert.equal(created.emailed.const, undefined);
+  assert.equal(replayed.emailed.type, "boolean");
+  assert.equal(replayed.emailed.const, false);
+
   assert.deepEqual(schemas.WorkspaceClaimResult.oneOf, [
     { $ref: "#/components/schemas/WorkspaceClaimCreated" },
     { $ref: "#/components/schemas/WorkspaceClaimReplayed" },
@@ -453,4 +460,33 @@ test("the OpenAPI validator rejects a claim missing a lifecycle timestamp", () =
   for (const name of ["missingAcceptedAt", "missingRevokedAt"]) {
     assert.ok(names.has(name), name);
   }
+});
+
+test("the OpenAPI validator accepts results with and without emailed, and rejects an emailed replay", () => {
+  const valid = structuredClone(contract);
+  mediaType(valid, "201").examples = {
+    emailed: { value: { data: { ...FRESH, emailed: true } } },
+    notEmailed: { value: { data: { ...FRESH, emailed: false } } },
+    olderServer: { value: { data: FRESH } },
+  };
+  mediaType(valid, "200").examples = {
+    replayed: { value: { data: { ...REPLAY, emailed: false } } },
+    olderServer: { value: { data: REPLAY } },
+  };
+  const accepted = lintDocument(valid, "claim-emailed-examples");
+  assert.equal(accepted.status, 0, `${accepted.stdout}\n${accepted.stderr}`);
+
+  const invalid = structuredClone(contract);
+  mediaType(invalid, "201").examples = {
+    stringEmailed: { value: { data: { ...FRESH, emailed: "yes" } } },
+  };
+  mediaType(invalid, "200").examples = {
+    emailedReplay: { value: { data: { ...REPLAY, emailed: true } } },
+  };
+  const refused = lintDocument(invalid, "claim-emailed-invalid");
+  assert.notEqual(refused.status, 0);
+  assert.deepEqual([...invalidExampleNames(refused)].sort(), [
+    "emailedReplay",
+    "stringEmailed",
+  ]);
 });

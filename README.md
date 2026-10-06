@@ -282,6 +282,18 @@ before it ignore the header, so a create-only caller should also confirm the
 `201`. The GET, PUT and rotate operations shipped before this contract and are
 documented as deployed; every addition is optional, so this is a minor bump.
 
+## Unreleased workspace claim email
+
+Contract `1.8.0` adds an optional boolean `emailed` to both workspace claim
+results. On a fresh `201` it says whether this request emailed the claim URL to
+the claimed address; an installation that sends no claim emails answers
+`false`, and servers before `1.8.0` omit it. On a replay `200` it is always
+`false` when present: a replay sends nothing. The email carries the link and
+its expiry and no text the agent chose, and a failed send never fails the
+claim. One optional response field is a minor bump under
+[`VERSIONING.md`](VERSIONING.md), so `info.version` moves from `1.7.0` to
+`1.8.0`.
+
 ## Check and bundle
 
 ```sh

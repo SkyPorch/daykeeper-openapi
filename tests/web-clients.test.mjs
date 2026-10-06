@@ -69,8 +69,9 @@ after(() => {
   if (directory) rmSync(directory, { recursive: true, force: true });
 });
 
-test("the contract version is 1.7.0", () => {
-  assert.equal(contract.info.version, "1.7.0");
+test("the contract version is 1.8.0", () => {
+  // 1.8.0 adds the optional `emailed` field to workspace claim results.
+  assert.equal(contract.info.version, "1.8.0");
 });
 
 test("web-client operations exist with the right scopes and tag", () => {

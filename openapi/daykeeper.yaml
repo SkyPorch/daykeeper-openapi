@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Daykeeper Management API
-  version: 1.7.0
+  version: 1.8.0
   summary: Safe, multi-tenant support administration for people and agents.
   description: |
     Daykeeper owns tenant lifecycle, support-channel provisioning, durable
@@ -2026,9 +2026,13 @@ paths:
         per-principal request limits answer RATE_LIMITED with a Retry-After
         header. A client should treat either as retryable after the interval.
 
-        Daykeeper sends no email. The claim URL carries the token in its
-        fragment so it never reaches server logs or referrers; it is a secret,
-        it is shown once, and the agent delivers it out of band.
+        The claim URL carries the token in its fragment so it never reaches
+        server logs or referrers; it is a secret, it is shown once, and the
+        agent delivers it out of band. An installation may also email the link
+        to the claimed address when a new claim is created (never on a replay);
+        the optional `emailed` field says whether this response did. Servers
+        before 1.8.0, and installations that send no claim emails, omit it or
+        answer `false`, and the agent remains the one who delivers the link.
 
         When a request fails without a usable response its outcome is unknown.
         Repeat it with the same key and the exact original body to learn what
@@ -4526,8 +4530,8 @@ components:
             characters that neither start nor end with a hyphen, separated by
             dots, and at least one dot is required. Uppercase is rejected rather
             than folded so the stored address matches the one that signs in.
-            Daykeeper sends no email; the caller delivers the returned claim URL
-            out of band.
+            The caller delivers the returned claim URL; an installation may also
+            email it to this address (see `emailed` on the result).
           examples:
             - gabriel@acme.com
             - gabriel+claims@mail.acme.co.uk
@@ -4559,6 +4563,14 @@ components:
         replayed:
           type: boolean
           const: false
+        emailed:
+          type: boolean
+          description: |
+            Whether this request emailed the claim URL to the claimed address.
+            Optional: absent on servers before contract 1.8.0. `false` when the
+            installation sends no claim emails or the send did not succeed; a
+            failed send never fails the claim. The email carries the link and
+            its expiry and no text the agent chose.
     WorkspaceClaimReplayed:
       type: object
       additionalProperties: false
@@ -4579,6 +4591,12 @@ components:
         replayed:
           type: boolean
           const: true
+        emailed:
+          type: boolean
+          const: false
+          description: |
+            Optional, and always `false` when present: a replay sends no email.
+            Whether the original request emailed the link is not repeated.
     WorkspaceClaimResult:
       description: |
         Either result of a create call, discriminated by `replayed`: a fresh
