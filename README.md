@@ -228,7 +228,8 @@ requires an `Idempotency-Key` and a machine-owner credential with
 `replayed: false` and reveals `token` and `claimUrl` exactly once; an exact
 repeat answers `200` with `replayed: true` and both fields `null`. The token
 rides in the URL fragment, so it never reaches server logs or referrers, and
-Daykeeper sends no email: the caller delivers the URL. Never log or persist it.
+the caller delivers the URL; from `1.8.0` an installation may also email it
+(see "Unreleased workspace claim email" below). Never log or persist it.
 
 The two success bodies are separate schemas rather than one loose shape.
 `WorkspaceClaimCreated` is the `201` body: a non-null `token` and `claimUrl`
@@ -285,10 +286,14 @@ documented as deployed; every addition is optional, so this is a minor bump.
 ## Unreleased workspace claim email
 
 Contract `1.8.0` adds an optional boolean `emailed` to both workspace claim
-results. On a fresh `201` it says whether this request emailed the claim URL to
-the claimed address; an installation that sends no claim emails answers
-`false`, and servers before `1.8.0` omit it. On a replay `200` it is always
-`false` when present: a replay sends nothing. The email carries the link and
+results. Only an installation configured to email claim links sends it: on a
+fresh `201` it says whether this request emailed the claim URL to the claimed
+address, and on a replay `200` it is always `false` (a replay sends nothing).
+Installations that do not email claims, the default, and servers before
+`1.8.0` omit it, so their results keep the `1.7.0` shape exactly. The result
+schemas keep `additionalProperties: false`, so a client that validates
+strictly against `1.7.0` would refuse the new field: operators must upgrade
+clients to `1.8.0` before turning claim emails on. The email carries the link and
 its expiry and no text the agent chose, and a failed send never fails the
 claim. One optional response field is a minor bump under
 [`VERSIONING.md`](VERSIONING.md), so `info.version` moves from `1.7.0` to

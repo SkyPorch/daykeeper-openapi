@@ -2028,11 +2028,13 @@ paths:
 
         The claim URL carries the token in its fragment so it never reaches
         server logs or referrers; it is a secret, it is shown once, and the
-        agent delivers it out of band. An installation may also email the link
-        to the claimed address when a new claim is created (never on a replay);
-        the optional `emailed` field says whether this response did. Servers
-        before 1.8.0, and installations that send no claim emails, omit it or
-        answer `false`, and the agent remains the one who delivers the link.
+        agent delivers it out of band. An installation may also be configured
+        to email the link to the claimed address when a new claim is created
+        (never on a replay); only such an installation adds the optional
+        `emailed` field, saying whether this response did. Servers before
+        1.8.0 and installations that do not email claims (the default) omit
+        it, so their results keep the 1.7 shape exactly; operators must
+        upgrade clients to 1.8.0 before turning claim emails on.
 
         When a request fails without a usable response its outcome is unknown.
         Repeat it with the same key and the exact original body to learn what
@@ -4567,10 +4569,14 @@ components:
           type: boolean
           description: |
             Whether this request emailed the claim URL to the claimed address.
-            Optional: absent on servers before contract 1.8.0. `false` when the
-            installation sends no claim emails or the send did not succeed; a
-            failed send never fails the claim. The email carries the link and
-            its expiry and no text the agent chose.
+            Present only on an installation that emails claim links, and then
+            `false` when the send did not succeed (a failed send never fails
+            the claim). An installation that does not email claims, which is
+            the default, omits the field, so its responses keep the 1.7 shape
+            that this schema's `additionalProperties: false` accepted.
+            Operators must move clients to 1.8.0 before turning claim emails
+            on. The email carries the link and its expiry and no text the
+            agent chose.
     WorkspaceClaimReplayed:
       type: object
       additionalProperties: false
@@ -4595,8 +4601,10 @@ components:
           type: boolean
           const: false
           description: |
-            Optional, and always `false` when present: a replay sends no email.
-            Whether the original request emailed the link is not repeated.
+            Present only on an installation that emails claim links, and then
+            always `false`: a replay sends no email, and whether the original
+            request emailed the link is not repeated. Omitted elsewhere, as on
+            the created result.
     WorkspaceClaimResult:
       description: |
         Either result of a create call, discriminated by `replayed`: a fresh

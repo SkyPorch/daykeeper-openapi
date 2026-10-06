@@ -255,6 +255,17 @@ test("claim schemas are strict, owner-only, and reveal the token exactly once", 
   assert.equal(created.emailed.const, undefined);
   assert.equal(replayed.emailed.type, "boolean");
   assert.equal(replayed.emailed.const, false);
+  // Only an installation that emails claims sends the field; everywhere else
+  // results keep the 1.7 shape that additionalProperties: false accepted.
+  for (const property of [created.emailed, replayed.emailed])
+    assert.match(
+      property.description,
+      /Present only on an installation that emails claim links/,
+    );
+  assert.match(
+    created.emailed.description,
+    /move clients to 1\.8\.0 before turning claim emails/,
+  );
 
   assert.deepEqual(schemas.WorkspaceClaimResult.oneOf, [
     { $ref: "#/components/schemas/WorkspaceClaimCreated" },
