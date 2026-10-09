@@ -23,11 +23,21 @@ customer-facing SDK.
 SDKs are generated or contract-tested against tagged specifications from this
 repository. Service implementation types are not a public contract.
 
-Operator conversation replies use `daykeeper.conversations:write` and return
-`201` when accepted. If a reply fails after dispatch, the error may include
-`outcomeUnknown: true`; inspect the conversation and messages before deciding
-whether to repeat the request. Clients must not automatically retry uncertain
-replies.
+The authenticated-person profile and workspace list are read through
+`GET /v1/profile` and `GET /v1/workspaces` with `daykeeper.accounts:read`. The
+access token chooses the active workspace; the list does not change it.
+
+Operator conversation list and message reads use `daykeeper.conversations:read`
+and return cursor page metadata. Message pages start with the latest messages
+in chronological order; pass the returned cursor to load older messages.
+Status changes require `daykeeper.conversations:write`. Replies may include a
+UUID `Idempotency-Key`; repeating the same reply under that key returns the
+stored result without sending a duplicate. Omitting the header remains
+compatible with older clients.
+
+Customer email settings are available at
+`/v1/tenants/{tenantId}/customer-email` to a human-owner OAuth credential with
+`daykeeper.accounts:read` or `daykeeper.accounts:write`.
 
 ## Unreleased entitlement contract
 

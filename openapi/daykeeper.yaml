@@ -18,6 +18,10 @@ servers:
   - url: https://api.daykeeper.example
     description: Placeholder origin; SDK consumers configure their deployed Daykeeper origin.
 tags:
+  - name: Profile and workspaces
+    description: Identity and connected workspace for the authenticated person.
+  - name: Customer email
+    description: Human-owner settings for customer email updates.
   - name: Capabilities
     description: Runtime feature and schema discovery.
   - name: Entitlements
@@ -52,6 +56,54 @@ security:
   - daykeeperOAuth:
       - daykeeper.accounts:read
 paths:
+  /v1/profile:
+    get:
+      operationId: getProfile
+      summary: Read the authenticated person's profile and connected workspace
+      description: |
+        Requires daykeeper.accounts:read. Returns only the person and
+        workspace bound to the access token. The caller cannot select or
+        change the active workspace through this endpoint.
+      tags: [Profile and workspaces]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:read]
+      responses:
+        "200":
+          description: The authenticated person's profile.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfileResponse"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces:
+    get:
+      operationId: listWorkspaces
+      summary: List workspaces available to the authenticated person
+      description: |
+        Requires daykeeper.accounts:read. The current workspace remains the
+        one bound to the access token. This list cannot be used to change it;
+        reconnect through the host to use another workspace.
+      tags: [Profile and workspaces]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:read]
+      responses:
+        "200":
+          description: Workspaces available to the authenticated person.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceListResponse"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/capabilities:
     get:
       operationId: getCapabilities
@@ -1566,14 +1618,23 @@ paths:
       description: |
         Requires daykeeper.conversations:read. The tenant is selected only by
         the authenticated principal and path; provider credentials and
-        provider-internal identifiers are never returned. Results are bounded
-        to 100 conversations. This is a read-only operation.
+        provider-internal identifiers are never returned. Results are paginated
+        with at most 100 conversations per page. A cursor continues the current
+        tenant's list. This is a read-only operation.
       tags: [Operator conversations]
       security:
         - daykeeperOAuth: [daykeeper.conversations:read]
         - daykeeperServerKey: []
       parameters:
         - $ref: "#/components/parameters/TenantId"
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string, minLength: 1, maxLength: 512 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100 }
       responses:
         "200":
           description: Bounded tenant conversation list.
@@ -1586,6 +1647,62 @@ paths:
                 $ref: "#/components/schemas/OperatorConversationListResponse"
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/tenants/{tenantId}/conversations/{conversationId}:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - name: conversationId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+    get:
+      operationId: getOperatorConversation
+      summary: Read one support conversation
+      description: Requires daykeeper.conversations:read and returns one tenant-bound conversation summary.
+      tags: [Operator conversations]
+      security:
+        - daykeeperOAuth: [daykeeper.conversations:read]
+        - daykeeperServerKey: []
+      responses:
+        "200":
+          description: The requested conversation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorConversationDetailResponse"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: setOperatorConversationStatus
+      summary: Set a support conversation's open or resolved status
+      description: Requires daykeeper.conversations:write. Only the status may be changed.
+      tags: [Operator conversations]
+      security:
+        - daykeeperOAuth: [daykeeper.conversations:write]
+        - daykeeperServerKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OperatorConversationStatusInput"
+      responses:
+        "200":
+          description: The conversation status was updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorConversationStatusResponse"
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
   /v1/tenants/{tenantId}/conversations/{conversationId}/messages:
     parameters:
@@ -1601,11 +1718,24 @@ paths:
     get:
       operationId: listOperatorConversationMessages
       summary: Read messages for one support conversation
-      description: Requires daykeeper.conversations:read. Messages are bounded to 200 and provider internals are omitted.
+      description: |
+        Requires daykeeper.conversations:read. The first page contains the
+        latest messages, sorted oldest to newest. Pass `cursor` from the page
+        to read older messages. Each page is bounded to 200 and provider
+        internals are omitted.
       tags: [Operator conversations]
       security:
         - daykeeperOAuth: [daykeeper.conversations:read]
         - daykeeperServerKey: []
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string, minLength: 1, maxLength: 512 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200 }
       responses:
         "200":
           description: Bounded conversation messages.
@@ -1626,13 +1756,22 @@ paths:
       description: |
         Requires daykeeper.conversations:write. The server dispatches the
         provider write once and does not automatically retry it. If the
-        response is lost, the caller must inspect the conversation before
-        deciding whether to repeat the request. Content is trimmed and limited
-        to 4,000 characters.
+        response is lost, repeat the exact request with the same
+        Idempotency-Key to receive its original result without sending a
+        duplicate reply. The header is optional for compatibility with older
+        callers. Content is trimmed and limited to 4,000 characters.
       tags: [Operator conversations]
       security:
         - daykeeperOAuth: [daykeeper.conversations:write]
         - daykeeperServerKey: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: UUID for one reply attempt. Reuse it only with the exact same conversation and body.
+          schema:
+            type: string
+            format: uuid
       requestBody:
         required: true
         content:
@@ -1640,6 +1779,12 @@ paths:
             schema:
               $ref: "#/components/schemas/OperatorReplyInput"
       responses:
+        "200":
+          description: The reply result returned for an exact replay.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorConversationReplyResponse"
         "201":
           description: Reply accepted by the provider.
           headers:
@@ -1649,6 +1794,52 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OperatorConversationReplyResponse"
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/tenants/{tenantId}/customer-email:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      operationId: getCustomerEmail
+      summary: Read customer email settings
+      description: Requires a human-owner credential with daykeeper.accounts:read.
+      tags: [Customer email]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:read]
+      responses:
+        "200":
+          description: Customer email settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerEmailResponse"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: setCustomerEmail
+      summary: Update customer email settings
+      description: Requires a human-owner credential with daykeeper.accounts:write.
+      tags: [Customer email]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerEmailInput"
+      responses:
+        "200":
+          description: Updated customer email settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerEmailResponse"
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
@@ -2565,6 +2756,119 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
   schemas:
+    Profile:
+      type: object
+      additionalProperties: true
+      required: [userId, name, email, organizationId, workspace]
+      properties:
+        userId: { type: string, format: uuid }
+        name: { type: string, maxLength: 200 }
+        email: { type: string, format: email, maxLength: 254 }
+        organizationId: { type: string, format: uuid }
+        workspace:
+          type: object
+          additionalProperties: true
+          required: [organizationId, organizationSlug, name]
+          properties:
+            organizationId: { type: string, format: uuid }
+            organizationSlug: { type: string, maxLength: 120 }
+            name: { type: string, maxLength: 200 }
+    Workspace:
+      type: object
+      additionalProperties: true
+      required: [organizationId, organizationSlug, name, role]
+      properties:
+        organizationId: { type: string, format: uuid }
+        organizationSlug: { type: string, maxLength: 120 }
+        name: { type: string, maxLength: 200 }
+        role: { type: string, maxLength: 40 }
+    WorkspaceList:
+      type: object
+      additionalProperties: true
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 1000
+          items: { $ref: "#/components/schemas/Workspace" }
+    CustomerEmail:
+      type: object
+      additionalProperties: true
+      required:
+        [
+          tenantId,
+          enabled,
+          customSender,
+          senderName,
+          sendingDomain,
+          deliveryEnabled,
+        ]
+      properties:
+        tenantId: { type: string, format: uuid }
+        enabled: { type: boolean }
+        customSender: { type: [string, "null"], maxLength: 254 }
+        senderName: { type: [string, "null"], maxLength: 200 }
+        sendingDomain: { type: [string, "null"], maxLength: 253 }
+        deliveryEnabled: { type: boolean }
+    CustomerEmailInput:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+    OperatorConversationPage:
+      type: object
+      additionalProperties: false
+      required: [limit, nextCursor, hasMore]
+      properties:
+        limit: { type: integer, minimum: 1, maximum: 100 }
+        nextCursor: { type: [string, "null"], maxLength: 512 }
+        hasMore: { type: boolean }
+    OperatorConversationMessagesPage:
+      type: object
+      additionalProperties: false
+      required: [limit, nextCursor, hasMore]
+      properties:
+        limit: { type: integer, minimum: 1, maximum: 200 }
+        nextCursor: { type: [string, "null"], maxLength: 512 }
+        hasMore: { type: boolean }
+    OperatorConversationStatus:
+      type: string
+      enum: [open, resolved]
+    OperatorConversationStatusInput:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { $ref: "#/components/schemas/OperatorConversationStatus" }
+    OperatorConversationStatusResult:
+      type: object
+      additionalProperties: true
+      required: [tenantId, conversationId, conversation]
+      properties:
+        tenantId: { type: string, format: uuid }
+        conversationId:
+          {
+            type: integer,
+            format: int64,
+            minimum: 1,
+            maximum: 9007199254740991,
+          }
+        conversation: { $ref: "#/components/schemas/OperatorConversation" }
+    OperatorConversationDetail:
+      type: object
+      additionalProperties: false
+      required: [tenantId, conversationId, conversation]
+      properties:
+        tenantId: { type: string, format: uuid }
+        conversationId:
+          {
+            type: integer,
+            format: int64,
+            minimum: 1,
+            maximum: 9007199254740991,
+          }
+        conversation: { $ref: "#/components/schemas/OperatorConversation" }
     OperatorConversation:
       type: object
       additionalProperties: false
@@ -2614,18 +2918,19 @@ components:
         content: { type: string, minLength: 1, maxLength: 4000 }
     OperatorConversationList:
       type: object
-      additionalProperties: false
-      required: [tenantId, conversations]
+      additionalProperties: true
+      required: [tenantId, conversations, page]
       properties:
         tenantId: { type: string, format: uuid }
         conversations:
           type: array
           maxItems: 100
           items: { $ref: "#/components/schemas/OperatorConversation" }
+        page: { $ref: "#/components/schemas/OperatorConversationPage" }
     OperatorConversationMessages:
       type: object
-      additionalProperties: false
-      required: [tenantId, conversationId, messages]
+      additionalProperties: true
+      required: [tenantId, conversationId, messages, page]
       properties:
         tenantId: { type: string, format: uuid }
         conversationId:
@@ -2639,6 +2944,7 @@ components:
           type: array
           maxItems: 200
           items: { $ref: "#/components/schemas/OperatorMessage" }
+        page: { $ref: "#/components/schemas/OperatorConversationMessagesPage" }
     OperatorConversationReply:
       type: object
       additionalProperties: false
@@ -5022,6 +5328,41 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/FlowVersion"
+    ProfileResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/Profile"
+    WorkspaceListResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/WorkspaceList"
+    CustomerEmailResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/CustomerEmail"
+    OperatorConversationStatusResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/OperatorConversationStatusResult"
+    OperatorConversationDetailResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/OperatorConversationDetail"
     OperatorConversationListResponse:
       allOf:
         - $ref: "#/components/schemas/SuccessEnvelope"
