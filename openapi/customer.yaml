@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Daykeeper Customer API
-  version: 0.1.0
+  version: 0.2.0
   summary: Customer conversation access through a tenant-safe Daykeeper gateway.
   description: |
     This API is safe for a customer-facing browser when the consuming
@@ -129,25 +129,88 @@ paths:
     get:
       operationId: listCustomerMessages
       summary: List visible messages in a customer conversation
-      description: Private agent notes and activity records are never returned.
+      description: |
+        Requests without `pagination=cursor` retain the legacy v1 response and
+        `after` behavior. Cursor pagination is an additive opt-in. Set
+        `pagination=cursor` on every initial, `before`, and `after` request to
+        receive the marked cursor response. Private agent notes and activity
+        records are never returned. Cursor results are in ascending message
+        identifier order. With no cursor, the cursor profile returns the latest
+        20 customer-visible messages. `before` returns up to 20 customer-visible
+        messages older than that identifier; `after` returns up to 20 newer
+        messages. `before` and `after` cannot be combined. Cursor identifiers
+        and response message IDs are positive JavaScript safe integers. If a
+        message ID is outside that range, cursor mode returns HTTP 502 with
+        `message_id_out_of_range`.
+
+        Each cursor response's normalized JSON envelope, including its
+        `pagination` marker, is capped at 786432 UTF-8 bytes, so a page can
+        contain fewer than 20 records. `after` pages are the oldest contiguous
+        prefix; continue from the last returned id until an empty page. Initial
+        and `before` pages are the newest contiguous suffix; continue before the
+        oldest returned id until an empty page. A single message that cannot
+        fit returns HTTP 413 with `message_too_large`. Invalid cursors,
+        `before` without cursor mode, and combined cursors return HTTP 400.
+        A short non-empty cursor page does not prove that history is exhausted.
       tags: [Conversations]
       parameters:
         - name: after
           in: query
           required: false
-          description: Return messages with a larger monotonic identifier.
+          description: |
+            Legacy requests retain their existing behavior, which returns at
+            most the provider's 100-record limit. In cursor mode, return up to
+            20 messages with a larger monotonic identifier. Cursor values must
+            be positive JavaScript safe integers.
           schema:
             type: integer
             minimum: 1
+        - name: before
+          in: query
+          required: false
+          description: |
+            Requires `pagination=cursor`. Return up to 20 messages with a
+            smaller monotonic identifier. Cursor values must be positive
+            JavaScript safe integers.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 9007199254740991
+        - name: pagination
+          in: query
+          required: false
+          description: |
+            Set to `cursor` to opt into bounded, cursor-marked pages. Omit to
+            preserve the legacy v1 response and after behavior.
+          schema:
+            type: string
+            enum: [cursor]
+      x-daykeeper-mutually-exclusive-parameters: [after, before]
       responses:
         "200":
           description: Visible customer conversation messages.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MessageList"
+                oneOf:
+                  - $ref: "#/components/schemas/MessageList"
+                  - $ref: "#/components/schemas/CursorMessageList"
         "401":
           $ref: "#/components/responses/Error"
+        "400":
+          $ref: "#/components/responses/Error"
+        "413":
+          description: One normalized message exceeds the cursor page byte budget.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerError"
+        "502":
+          description: A provider message identifier cannot be represented safely in cursor mode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerError"
         default:
           $ref: "#/components/responses/Error"
     post:
@@ -399,6 +462,48 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Attachment"
+    CursorMessage:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          conversationId,
+          content,
+          contentType,
+          contentAttributes,
+          messageType,
+          createdAt,
+          sender,
+          attachments,
+        ]
+      properties:
+        id:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        conversationId:
+          type: integer
+          minimum: 1
+        content:
+          type: [string, "null"]
+        contentType:
+          type: string
+        contentAttributes:
+          type: object
+          additionalProperties: true
+        messageType:
+          type: integer
+        createdAt:
+          type: [integer, string, "null"]
+        sender:
+          oneOf:
+            - $ref: "#/components/schemas/MessageSender"
+            - type: "null"
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Attachment"
     MessageSender:
       type: object
       additionalProperties: false
@@ -500,6 +605,19 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Message"
+    CursorMessageList:
+      type: object
+      additionalProperties: false
+      required: [pagination, messages]
+      properties:
+        pagination:
+          type: string
+          const: cursor
+        messages:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/CursorMessage"
     MessageResult:
       type: object
       additionalProperties: false
