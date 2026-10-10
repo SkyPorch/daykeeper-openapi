@@ -206,10 +206,14 @@ test("conversation and message lists page with the server's own bounds", () => {
     assert.equal(parameters.limit.schema.minimum, 1);
     assert.equal(parameters.limit.schema.maximum, 100);
     assert.equal(parameters.limit.schema.default, 50);
-    assert.match(
-      contract.paths[route].get.description,
-      /Servers\s+before\s+1\.9\.0\s+ignore\s+both\s+parameters\s+and\s+omit\s+`page`/,
+    const description = contract.paths[route].get.description.replace(
+      /\s+/g,
+      " ",
     );
+    // Opt-in: without limit or cursor the 1.8 representation is preserved.
+    assert.match(description, /Pagination is opt-in from 1\.9\.0/);
+    assert.match(description, /sends neither receives the 1\.8 representation/);
+    assert.match(description, /never send `page`/);
   }
   const schemas = contract.components.schemas;
   for (const name of [
@@ -429,6 +433,28 @@ test("customer email reads for members and writes for human owners", () => {
   );
 });
 
+test("human-only routes document an authorization code flow", () => {
+  const flows = contract.components.securitySchemes.daykeeperOAuth.flows;
+  assert.ok(flows.clientCredentials, "machine flow stays");
+  const human = flows.authorizationCode;
+  assert.match(human.authorizationUrl, /^https:\/\//);
+  assert.match(human.tokenUrl, /^https:\/\//);
+  for (const scope of [
+    "daykeeper.accounts:read",
+    "daykeeper.accounts:write",
+    "daykeeper.billing:read",
+    "daykeeper.conversations:read",
+    "daykeeper.conversations:write",
+  ])
+    assert.ok(human.scopes[scope], scope);
+  for (const operation of [
+    contract.paths["/v1/profile"].get,
+    contract.paths["/v1/workspaces"].get,
+    contract.paths[CUSTOMER_EMAIL].post,
+  ])
+    assert.match(operation.description, /authorization\s+code/);
+});
+
 test("capabilities describe the Dashboard features as optional and open", () => {
   const capabilities = contract.components.schemas.Capabilities;
   for (const name of [
@@ -449,5 +475,11 @@ test("capabilities describe the Dashboard features as optional and open", () => 
       capabilities.properties.operatorConversations.properties,
     ).sort(),
     ["enabled", "idempotentReplies", "pagination", "statusUpdates"],
+  );
+  // One flag covers both methods on the single-conversation path.
+  assert.match(
+    capabilities.properties.operatorConversations.properties.statusUpdates
+      .description,
+    /GET .* and PATCH/,
   );
 });

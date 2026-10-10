@@ -316,13 +316,12 @@ minor bump under [`VERSIONING.md`](VERSIONING.md).
   `resolved` (`daykeeper.conversations:write`) and answers only after the
   server has confirmed the new status.
 - Conversation and message lists accept `limit` (1-100, default 50) and an
-  opaque `cursor`, and return `page: { limit, nextCursor, hasMore }`. Message
-  pages start at the latest messages, sorted oldest to newest; pass
-  `nextCursor` unchanged for older ones. Servers before `1.9.0` ignore both
-  parameters and omit `page`. The list schemas are now open
-  (`additionalProperties: true`), but a client generated from an earlier
-  contract that validates strictly would refuse `page`: upgrade such clients
-  before the server.
+  opaque `cursor`. Pagination is opt-in: a request that sends either gets
+  `page: { limit, nextCursor, hasMore }`; a request that sends neither gets the
+  1.8 representation with no `page`, so clients generated from earlier
+  contracts keep decoding it. Message pages start at the latest messages,
+  sorted oldest to newest; pass `nextCursor` unchanged for older ones. The
+  list schemas are now open (`additionalProperties: true`).
 - Replies accept an optional UUID `Idempotency-Key`. An exact replay returns
   the original message with `200`; a reused key for a different request, or a
   replay while the first attempt is in progress, answers `409`. Replies
@@ -331,8 +330,11 @@ minor bump under [`VERSIONING.md`](VERSIONING.md).
   email switch on the bearer API. Members with `daykeeper.accounts:read` read
   it; only a human owner with `daykeeper.accounts:write` changes it.
 - Capabilities may report `operatorConversations` (`pagination`,
-  `statusUpdates`, `idempotentReplies`), `customerEmail`, and
-  `dashboardIdentity`. Absent means the server predates the feature.
+  `statusUpdates` for both GET and PATCH on one conversation,
+  `idempotentReplies`), `customerEmail`, and `dashboardIdentity`. Absent
+  means the server predates the feature.
+- `daykeeperOAuth` documents the authorization code flow (PKCE) that issues
+  the human tokens these routes require, beside client credentials.
 
 ## Check and bundle
 
