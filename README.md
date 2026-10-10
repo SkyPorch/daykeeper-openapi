@@ -23,21 +23,13 @@ customer-facing SDK.
 SDKs are generated or contract-tested against tagged specifications from this
 repository. Service implementation types are not a public contract.
 
-The authenticated-person profile and workspace list are read through
-`GET /v1/profile` and `GET /v1/workspaces` with `daykeeper.accounts:read`. The
-access token chooses the active workspace; the list does not change it.
-
-Operator conversation list and message reads use `daykeeper.conversations:read`
-and return cursor page metadata. Message pages start with the latest messages
-in chronological order; pass the returned cursor to load older messages.
-Status changes require `daykeeper.conversations:write`. Replies may include a
-UUID `Idempotency-Key`; repeating the same reply under that key returns the
-stored result without sending a duplicate. Omitting the header remains
-compatible with older clients.
-
-Customer email settings are available at
-`/v1/tenants/{tenantId}/customer-email` to a human-owner OAuth credential with
-`daykeeper.accounts:read` or `daykeeper.accounts:write`.
+Operator conversation replies use `daykeeper.conversations:write` and return
+`201` when accepted. If a reply fails after dispatch, the error may include
+`outcomeUnknown: true`; inspect the conversation and messages before deciding
+whether to repeat the request. Clients must not automatically retry uncertain
+replies. From `1.9.0` a reply may carry a UUID `Idempotency-Key`, and
+repeating the exact request with the same key returns the original message
+without sending a duplicate (see below).
 
 ## Unreleased entitlement contract
 
@@ -308,6 +300,39 @@ its expiry and no text the agent chose, and a failed send never fails the
 claim. One optional response field is a minor bump under
 [`VERSIONING.md`](VERSIONING.md), so `info.version` moves from `1.7.0` to
 `1.8.0`.
+
+## Unreleased Dashboard management API
+
+Contract `1.9.0` documents what the Daykeeper Dashboard (the ChatGPT app served
+by `daykeeper-mcp`) reads and changes. Every addition is optional, so this is a
+minor bump under [`VERSIONING.md`](VERSIONING.md).
+
+- `GET /v1/profile` and `GET /v1/workspaces` (`daykeeper.accounts:read`) return
+  the person and workspace bound to a human OAuth access token. The token
+  chooses the active workspace; the list cannot change it. Other credentials
+  receive `401`.
+- `GET /v1/tenants/{tenantId}/conversations/{conversationId}` reads one
+  conversation summary; `PATCH` on the same path sets `status` to `open` or
+  `resolved` (`daykeeper.conversations:write`) and answers only after the
+  server has confirmed the new status.
+- Conversation and message lists accept `limit` (1-100, default 50) and an
+  opaque `cursor`, and return `page: { limit, nextCursor, hasMore }`. Message
+  pages start at the latest messages, sorted oldest to newest; pass
+  `nextCursor` unchanged for older ones. Servers before `1.9.0` ignore both
+  parameters and omit `page`. The list schemas are now open
+  (`additionalProperties: true`), but a client generated from an earlier
+  contract that validates strictly would refuse `page`: upgrade such clients
+  before the server.
+- Replies accept an optional UUID `Idempotency-Key`. An exact replay returns
+  the original message with `200`; a reused key for a different request, or a
+  replay while the first attempt is in progress, answers `409`. Replies
+  without the header behave exactly as before.
+- `GET` and `POST /v1/tenants/{tenantId}/customer-email` expose the customer
+  email switch on the bearer API. Members with `daykeeper.accounts:read` read
+  it; only a human owner with `daykeeper.accounts:write` changes it.
+- Capabilities may report `operatorConversations` (`pagination`,
+  `statusUpdates`, `idempotentReplies`), `customerEmail`, and
+  `dashboardIdentity`. Absent means the server predates the feature.
 
 ## Check and bundle
 

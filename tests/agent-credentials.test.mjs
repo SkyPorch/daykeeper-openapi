@@ -568,8 +568,9 @@ test("server-key responses declare the credential-expiry header", () => {
         );
       }
     }
-  // 1.7.0 adds the three web-client operations.
-  assert.equal(operations, 8);
+  // 1.7.0 adds the three web-client operations; 1.9.0 adds reading one
+  // operator conversation and setting its status.
+  assert.equal(operations, 10);
 });
 
 test("a server key is warned off zero-overlap self-rotation", () => {
