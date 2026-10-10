@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Daykeeper Management API
-  version: 1.8.0
+  version: 1.9.0
   summary: Safe, multi-tenant support administration for people and agents.
   description: |
     Daykeeper owns tenant lifecycle, support-channel provisioning, durable
@@ -18,6 +18,10 @@ servers:
   - url: https://api.daykeeper.example
     description: Placeholder origin; SDK consumers configure their deployed Daykeeper origin.
 tags:
+  - name: Profile and workspaces
+    description: Identity and connected workspace for the authenticated person.
+  - name: Customer email
+    description: Human-owner settings for customer email updates.
   - name: Capabilities
     description: Runtime feature and schema discovery.
   - name: Entitlements
@@ -52,6 +56,60 @@ security:
   - daykeeperOAuth:
       - daykeeper.accounts:read
 paths:
+  /v1/profile:
+    get:
+      operationId: getProfile
+      summary: Read the authenticated person's profile and connected workspace
+      description: |
+        New in 1.9.0. Requires a human OAuth access token (authorization code
+        flow) issued for this API with daykeeper.accounts:read; server keys,
+        agent credentials, and
+        tokens issued for another resource receive 401. Returns only the
+        person and workspace bound to the access token. The caller cannot
+        select or change the active workspace through this endpoint.
+      tags: [Profile and workspaces]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:read]
+      responses:
+        "200":
+          description: The authenticated person's profile.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfileResponse"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces:
+    get:
+      operationId: listWorkspaces
+      summary: List workspaces available to the authenticated person
+      description: |
+        New in 1.9.0. Requires a human OAuth access token (authorization code
+        flow) issued for this API with daykeeper.accounts:read; other
+        credentials receive 401. The
+        current workspace remains the one bound to the access token. This list
+        cannot be used to change it; reconnect through the host to use another
+        workspace.
+      tags: [Profile and workspaces]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:read]
+      responses:
+        "200":
+          description: Workspaces available to the authenticated person.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceListResponse"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/capabilities:
     get:
       operationId: getCapabilities
@@ -1567,13 +1625,33 @@ paths:
         Requires daykeeper.conversations:read. The tenant is selected only by
         the authenticated principal and path; provider credentials and
         provider-internal identifiers are never returned. Results are bounded
-        to 100 conversations. This is a read-only operation.
+        to 100 conversations, newest activity first. This is a read-only
+        operation.
+
+        Pagination is opt-in from 1.9.0. A request that sends `limit` or
+        `cursor` receives a page of at most `limit` (default 50) conversations
+        and a `page` object; pass `page.nextCursor` unchanged to continue the
+        same tenant's list until it is null. A request that sends neither
+        receives the 1.8 representation: no `page` member and one bounded
+        list, so a client generated from an earlier contract keeps decoding
+        it. Servers before 1.9.0 ignore both parameters and never send
+        `page`.
       tags: [Operator conversations]
       security:
         - daykeeperOAuth: [daykeeper.conversations:read]
         - daykeeperServerKey: []
       parameters:
         - $ref: "#/components/parameters/TenantId"
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque `page.nextCursor` from the previous page, passed unchanged.
+          schema: { type: string, minLength: 1, maxLength: 256 }
+        - name: limit
+          in: query
+          required: false
+          description: Maximum items on this page. Defaults to 50.
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
       responses:
         "200":
           description: Bounded tenant conversation list.
@@ -1586,6 +1664,77 @@ paths:
                 $ref: "#/components/schemas/OperatorConversationListResponse"
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/tenants/{tenantId}/conversations/{conversationId}:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - name: conversationId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+    get:
+      operationId: getOperatorConversation
+      summary: Read one support conversation
+      description: |
+        New in 1.9.0. Requires daykeeper.conversations:read and returns one
+        tenant-bound conversation summary. A conversation in another tenant
+        answers 404. This is a read-only operation.
+      tags: [Operator conversations]
+      security:
+        - daykeeperOAuth: [daykeeper.conversations:read]
+        - daykeeperServerKey: []
+      responses:
+        "200":
+          description: The requested conversation.
+          headers:
+            Daykeeper-Credential-Expires-At:
+              $ref: "#/components/headers/DaykeeperCredentialExpiresAt"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorConversationDetailResponse"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: setOperatorConversationStatus
+      summary: Set a support conversation's open or resolved status
+      description: |
+        New in 1.9.0. Requires daykeeper.conversations:write. Only the status
+        may be changed. Setting the status the conversation already has
+        changes nothing and returns the current summary. The server reads the
+        conversation again and confirms the requested status before answering
+        200; if it cannot confirm, the request fails and the caller should
+        read the conversation before repeating it.
+      tags: [Operator conversations]
+      security:
+        - daykeeperOAuth: [daykeeper.conversations:write]
+        - daykeeperServerKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OperatorConversationStatusInput"
+      responses:
+        "200":
+          description: The conversation now has the requested status.
+          headers:
+            Daykeeper-Credential-Expires-At:
+              $ref: "#/components/headers/DaykeeperCredentialExpiresAt"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorConversationStatusResponse"
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
   /v1/tenants/{tenantId}/conversations/{conversationId}/messages:
     parameters:
@@ -1601,11 +1750,32 @@ paths:
     get:
       operationId: listOperatorConversationMessages
       summary: Read messages for one support conversation
-      description: Requires daykeeper.conversations:read. Messages are bounded to 200 and provider internals are omitted.
+      description: |
+        Requires daykeeper.conversations:read. Messages are bounded to 200,
+        sorted oldest to newest, and provider internals are omitted.
+
+        Pagination is opt-in from 1.9.0. A request that sends `limit` or
+        `cursor` receives the latest messages (at most `limit`, default 50)
+        and a `page` object; `page.nextCursor` reads older messages until it
+        is null. A full provider batch keeps `hasMore` true conservatively, so
+        a final page may be empty. A request that sends neither receives the
+        1.8 representation with no `page` member. Servers before 1.9.0 ignore
+        both parameters and never send `page`.
       tags: [Operator conversations]
       security:
         - daykeeperOAuth: [daykeeper.conversations:read]
         - daykeeperServerKey: []
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque `page.nextCursor` from the previous page, passed unchanged.
+          schema: { type: string, minLength: 1, maxLength: 256 }
+        - name: limit
+          in: query
+          required: false
+          description: Maximum items on this page. Defaults to 50.
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
       responses:
         "200":
           description: Bounded conversation messages.
@@ -1625,14 +1795,34 @@ paths:
       summary: Send one plain-text support reply
       description: |
         Requires daykeeper.conversations:write. The server dispatches the
-        provider write once and does not automatically retry it. If the
-        response is lost, the caller must inspect the conversation before
-        deciding whether to repeat the request. Content is trimmed and limited
-        to 4,000 characters.
+        provider write once and does not automatically retry it. Content is
+        trimmed and limited to 4,000 characters.
+
+        Without `Idempotency-Key` (the behavior before 1.9.0, still accepted)
+        a lost response leaves the outcome unknown: inspect the conversation
+        and messages before deciding whether to repeat the request.
+
+        From 1.9.0 a caller may send a UUID `Idempotency-Key`. Repeating the
+        exact request (same tenant, conversation, and content) with the same
+        key returns the original message with 200 instead of sending a
+        duplicate. Reusing a key for a different request, or repeating it while
+        the first attempt is still in progress, answers 409. An error with
+        `outcomeUnknown: true` may be retried with the same key. An
+        installation without durable reply idempotency answers
+        FEATURE_UNAVAILABLE (503) to a request that carries the header; see
+        `operatorConversations.idempotentReplies` in capabilities.
       tags: [Operator conversations]
       security:
         - daykeeperOAuth: [daykeeper.conversations:write]
         - daykeeperServerKey: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: New in 1.9.0. UUID for one reply attempt. Reuse it only with the exact same conversation and body.
+          schema:
+            type: string
+            format: uuid
       requestBody:
         required: true
         content:
@@ -1640,6 +1830,15 @@ paths:
             schema:
               $ref: "#/components/schemas/OperatorReplyInput"
       responses:
+        "200":
+          description: The original reply, returned for an exact replay of an Idempotency-Key request. Nothing new was sent.
+          headers:
+            Daykeeper-Credential-Expires-At:
+              $ref: "#/components/headers/DaykeeperCredentialExpiresAt"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorConversationReplyResponse"
         "201":
           description: Reply accepted by the provider.
           headers:
@@ -1649,6 +1848,67 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OperatorConversationReplyResponse"
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/tenants/{tenantId}/customer-email:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      operationId: getCustomerEmail
+      summary: Read customer email settings
+      description: |
+        New in 1.9.0 on the bearer API. Requires daykeeper.accounts:read and
+        access to the tenant; workspace members can read the setting. A tenant
+        in another organization answers 404.
+      tags: [Customer email]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:read]
+      responses:
+        "200":
+          description: Customer email settings.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerEmailResponse"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: setCustomerEmail
+      summary: Update customer email settings
+      description: |
+        New in 1.9.0 on the bearer API. Requires a human principal (authorization
+        code flow) holding daykeeper.accounts:write (a workspace owner); other
+        principals receive
+        403. Accepts exactly `{ "enabled": boolean }` and returns the stored
+        setting.
+      tags: [Customer email]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerEmailInput"
+      responses:
+        "200":
+          description: Updated customer email settings.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerEmailResponse"
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
@@ -2287,8 +2547,23 @@ components:
       description: Opaque machine-owner bearer credential. The operation's required Daykeeper account scope is documented on each operation.
     daykeeperOAuth:
       type: oauth2
-      description: Short-lived, audience-bound Daykeeper OAuth access token.
+      description: |
+        Short-lived, audience-bound Daykeeper OAuth access token. Machine
+        clients use client credentials. A person signs in through the
+        authorization code flow with PKCE (S256); routes documented as
+        requiring a human principal accept only those tokens. The deployed
+        issuer, endpoints, and supported scopes are published in the issuer's
+        OAuth authorization server metadata.
       flows:
+        authorizationCode:
+          authorizationUrl: https://console.daykeeper.example/oauth/authorize
+          tokenUrl: https://console.daykeeper.example/oauth/token
+          scopes:
+            daykeeper.accounts:read: Read the person's profile, workspace, organizations and tenants.
+            daykeeper.accounts:write: Change workspace settings as a human owner.
+            daykeeper.billing:read: Read organization-wide usage and billing status.
+            daykeeper.conversations:read: Read tenant-scoped support conversations and messages.
+            daykeeper.conversations:write: Send tenant-scoped support replies and set conversation status.
         clientCredentials:
           tokenUrl: https://api.daykeeper.example/oauth/token
           scopes:
@@ -2306,7 +2581,7 @@ components:
             daykeeper.lifecycle:write: Mint tokens for tenant lifecycle messages.
             daykeeper.customers:delete: Mint target-bound customer erasure tokens.
             daykeeper.conversations:read: Read tenant-scoped support conversations and messages.
-            daykeeper.conversations:write: Send one tenant-scoped plain-text support reply.
+            daykeeper.conversations:write: Send tenant-scoped plain-text support replies and set conversation status.
   parameters:
     IdempotencyKey:
       name: Idempotency-Key
@@ -2565,6 +2840,135 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
   schemas:
+    Profile:
+      type: object
+      additionalProperties: true
+      required: [userId, name, email, organizationId, workspace]
+      properties:
+        userId: { type: string, format: uuid }
+        name: { type: string, maxLength: 200 }
+        email: { type: string, format: email, maxLength: 254 }
+        organizationId: { type: string, format: uuid }
+        workspace:
+          type: object
+          additionalProperties: true
+          required: [organizationId, organizationSlug, name]
+          properties:
+            organizationId: { type: string, format: uuid }
+            organizationSlug: { type: string, maxLength: 120 }
+            name: { type: string, maxLength: 200 }
+    Workspace:
+      type: object
+      additionalProperties: true
+      required: [organizationId, organizationSlug, name]
+      properties:
+        organizationId: { type: string, format: uuid }
+        organizationSlug: { type: string, maxLength: 120 }
+        name: { type: string, maxLength: 200 }
+        role:
+          type: string
+          maxLength: 40
+          description: Optional. The person's role in the workspace when the server reports it, such as `owner` or `member`. Absent does not imply either role.
+    WorkspaceList:
+      type: object
+      additionalProperties: true
+      required: [items]
+      description: Workspaces the person can reach through this connection. The workspace bound to the access token is always the active one.
+      properties:
+        items:
+          type: array
+          maxItems: 1000
+          items: { $ref: "#/components/schemas/Workspace" }
+    CustomerEmail:
+      type: object
+      additionalProperties: true
+      required:
+        [
+          tenantId,
+          enabled,
+          customSender,
+          senderName,
+          sendingDomain,
+          deliveryEnabled,
+        ]
+      properties:
+        tenantId: { type: string, format: uuid }
+        enabled: { type: boolean }
+        customSender:
+          type: boolean
+          description: True when the workspace sends from its own verified domain; the switch then has no effect.
+        senderName:
+          type: string
+          maxLength: 200
+          description: The name customers see in the From line.
+        sendingDomain:
+          type: [string, "null"]
+          maxLength: 253
+          description: Where shared tenant email is sent from on this installation. Null when the installation does not send it yet; the switch is still saved.
+        deliveryEnabled:
+          type: boolean
+          description: Whether this installation sends shared tenant email at all.
+    CustomerEmailInput:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+    OperatorConversationPage:
+      type: object
+      additionalProperties: true
+      description: New in 1.9.0. Pass `nextCursor` unchanged to read the next page; null means there is no next page.
+      required: [limit, nextCursor, hasMore]
+      properties:
+        limit: { type: integer, minimum: 1, maximum: 100 }
+        nextCursor: { type: [string, "null"], minLength: 1, maxLength: 256 }
+        hasMore: { type: boolean }
+    OperatorConversationMessagesPage:
+      type: object
+      additionalProperties: true
+      description: New in 1.9.0. Pass `nextCursor` unchanged to read the next page; null means there is no next page.
+      required: [limit, nextCursor, hasMore]
+      properties:
+        limit: { type: integer, minimum: 1, maximum: 100 }
+        nextCursor: { type: [string, "null"], minLength: 1, maxLength: 256 }
+        hasMore: { type: boolean }
+    OperatorConversationStatus:
+      type: string
+      enum: [open, resolved]
+    OperatorConversationStatusInput:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { $ref: "#/components/schemas/OperatorConversationStatus" }
+    OperatorConversationStatusResult:
+      type: object
+      additionalProperties: true
+      required: [tenantId, conversationId, conversation]
+      properties:
+        tenantId: { type: string, format: uuid }
+        conversationId:
+          {
+            type: integer,
+            format: int64,
+            minimum: 1,
+            maximum: 9007199254740991,
+          }
+        conversation: { $ref: "#/components/schemas/OperatorConversation" }
+    OperatorConversationDetail:
+      type: object
+      additionalProperties: true
+      required: [tenantId, conversationId, conversation]
+      properties:
+        tenantId: { type: string, format: uuid }
+        conversationId:
+          {
+            type: integer,
+            format: int64,
+            minimum: 1,
+            maximum: 9007199254740991,
+          }
+        conversation: { $ref: "#/components/schemas/OperatorConversation" }
     OperatorConversation:
       type: object
       additionalProperties: false
@@ -2614,7 +3018,7 @@ components:
         content: { type: string, minLength: 1, maxLength: 4000 }
     OperatorConversationList:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [tenantId, conversations]
       properties:
         tenantId: { type: string, format: uuid }
@@ -2622,9 +3026,12 @@ components:
           type: array
           maxItems: 100
           items: { $ref: "#/components/schemas/OperatorConversation" }
+        page:
+          description: Present only when the request sent `limit` or `cursor` (1.9.0 and later).
+          allOf: [{ $ref: "#/components/schemas/OperatorConversationPage" }]
     OperatorConversationMessages:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [tenantId, conversationId, messages]
       properties:
         tenantId: { type: string, format: uuid }
@@ -2639,6 +3046,10 @@ components:
           type: array
           maxItems: 200
           items: { $ref: "#/components/schemas/OperatorMessage" }
+        page:
+          description: Present only when the request sent `limit` or `cursor` (1.9.0 and later).
+          allOf:
+            [{ $ref: "#/components/schemas/OperatorConversationMessagesPage" }]
     OperatorConversationReply:
       type: object
       additionalProperties: false
@@ -2766,6 +3177,46 @@ components:
             loopbackOrigins:
               type: boolean
               description: True when `http://localhost`, `http://127.0.0.1` and `http://[::1]` origins are accepted, for local development.
+        operatorConversations:
+          type: object
+          additionalProperties: true
+          description: |
+            Optional. `enabled: false` means the operator conversation routes
+            are not available. Servers before 1.9.0 send at most `enabled`; an
+            absent sub-flag means that feature is not available. Open to
+            fields added in later minor versions.
+          required: [enabled]
+          properties:
+            enabled:
+              type: boolean
+            pagination:
+              type: boolean
+              description: True when conversation and message reads accept `limit` and `cursor` and return `page` for a request that sends either.
+            statusUpdates:
+              type: boolean
+              description: True when GET (read one conversation) and PATCH (set its status) on /v1/tenants/{tenantId}/conversations/{conversationId} are available. Absent or false means neither is.
+            idempotentReplies:
+              type: boolean
+              description: True when replies accept `Idempotency-Key`. When false, a reply carrying the header answers FEATURE_UNAVAILABLE (503).
+        customerEmail:
+          type: object
+          additionalProperties: true
+          description: Optional; absent on servers before 1.9.0. True when the customer email routes are available on the bearer API.
+          required: [enabled]
+          properties:
+            enabled:
+              type: boolean
+            deliveryEnabled:
+              type: boolean
+              description: Whether this installation sends shared tenant email at all.
+        dashboardIdentity:
+          type: object
+          additionalProperties: true
+          description: Optional; absent on servers before 1.9.0. True when GET /v1/profile and GET /v1/workspaces are available.
+          required: [enabled]
+          properties:
+            enabled:
+              type: boolean
         flows:
           type: object
           additionalProperties: false
@@ -5022,6 +5473,41 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/FlowVersion"
+    ProfileResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/Profile"
+    WorkspaceListResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/WorkspaceList"
+    CustomerEmailResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/CustomerEmail"
+    OperatorConversationStatusResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/OperatorConversationStatusResult"
+    OperatorConversationDetailResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/OperatorConversationDetail"
     OperatorConversationListResponse:
       allOf:
         - $ref: "#/components/schemas/SuccessEnvelope"
