@@ -223,7 +223,13 @@ test("claim schemas are strict, owner-only, and reveal the token exactly once", 
     assert.deepEqual(property.type, ["string", "null"]);
     assert.equal(property.format, "date-time");
   }
-  assert.deepEqual(schemas.CreateWorkspaceClaimInput.required, ["email"]);
+  // 1.10.0: the address is optional (an open claim), and a claim reports a
+  // null address while it is open.
+  assert.equal(schemas.CreateWorkspaceClaimInput.required, undefined);
+  assert.deepEqual(schemas.WorkspaceClaim.properties.email.type, [
+    "string",
+    "null",
+  ]);
   assert.equal(
     schemas.CreateWorkspaceClaimInput.properties.email.maxLength,
     254,
@@ -499,5 +505,54 @@ test("the OpenAPI validator accepts results with and without emailed, and reject
   assert.deepEqual([...invalidExampleNames(refused)].sort(), [
     "emailedReplay",
     "stringEmailed",
+  ]);
+});
+
+test("the OpenAPI validator accepts open claims and still refuses a null or extra input", () => {
+  const OPEN = { ...CLAIM, email: null };
+  const valid = structuredClone(contract);
+  valid.paths["/v1/workspace-claims"].post.requestBody.content[
+    "application/json"
+  ].examples = {
+    open: { value: {} },
+    addressed: { value: { email: "a@b.co" } },
+  };
+  mediaType(valid, "201").examples = {
+    open: { value: { data: { ...FRESH, claim: OPEN, emailed: false } } },
+  };
+  mediaType(valid, "200").examples = {
+    acceptedOpen: {
+      value: {
+        data: {
+          ...REPLAY,
+          claim: {
+            ...CLAIM,
+            state: "accepted",
+            acceptedAt: "2026-09-11T01:00:00Z",
+          },
+        },
+      },
+    },
+  };
+  valid.paths["/v1/workspace-claims"].get.responses["200"].content[
+    "application/json"
+  ].examples = { mixed: { value: { data: { items: [OPEN, CLAIM] } } } };
+  const accepted = lintDocument(valid, "claim-open-examples");
+  assert.equal(accepted.status, 0, `${accepted.stdout}\n${accepted.stderr}`);
+
+  const invalid = structuredClone(contract);
+  invalid.paths["/v1/workspace-claims"].post.requestBody.content[
+    "application/json"
+  ].examples = {
+    nullAddress: { value: { email: null } },
+    emptyAddress: { value: { email: "" } },
+    extra: { value: { open: true } },
+  };
+  const refused = lintDocument(invalid, "claim-open-invalid");
+  assert.notEqual(refused.status, 0);
+  assert.deepEqual([...invalidExampleNames(refused)].sort(), [
+    "emptyAddress",
+    "extra",
+    "nullAddress",
   ]);
 });

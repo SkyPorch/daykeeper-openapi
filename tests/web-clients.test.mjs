@@ -69,9 +69,10 @@ after(() => {
   if (directory) rmSync(directory, { recursive: true, force: true });
 });
 
-test("the contract version is 1.9.0", () => {
-  // 1.9.0 adds the Dashboard management operations and pagination.
-  assert.equal(contract.info.version, "1.9.0");
+test("the contract version is 1.10.0", () => {
+  // 1.9.0 adds the Dashboard management operations and pagination; 1.10.0
+  // makes the workspace claim address optional (open claims).
+  assert.equal(contract.info.version, "1.10.0");
 });
 
 test("web-client operations exist with the right scopes and tag", () => {

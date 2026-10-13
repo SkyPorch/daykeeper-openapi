@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Daykeeper Management API
-  version: 1.9.0
+  version: 1.10.0
   summary: Safe, multi-tenant support administration for people and agents.
   description: |
     Daykeeper owns tenant lifecycle, support-channel provisioning, durable
@@ -2270,6 +2270,16 @@ paths:
         constrained to true. Neither status ever carries the other's shape, so a
         client may narrow on the status code alone.
 
+        Since 1.10.0 the address is optional. A request without `email` issues
+        an open claim: a single-use link that any signed-in person with a
+        verified email who is not already a member may accept once, becoming an
+        owner. Its `claim.email` is null while it is pending or revoked and the
+        accepting address once accepted. One pending open claim exists per
+        organization; it is never emailed (`emailed`, where present, is false),
+        and an exact repeat of an open claim's key after it was accepted answers
+        200 with that accepted claim. Prefer an address whenever the caller
+        knows it: an open link is a bearer secret for owner access.
+
         One pending claim exists per email per organization. A different intent
         for the same address while a claim is pending is rejected with
         INVITATION_ALREADY_PENDING (409); an address that already holds a
@@ -2319,6 +2329,9 @@ paths:
                 summary: Hand the workspace to a person by address
                 value:
                   email: gabriel@acme.com
+              open:
+                summary: Issue an open claim link that names nobody (1.10.0)
+                value: {}
       responses:
         "200":
           description: The exact original request was replayed; the token and claim URL are no longer available.
@@ -4907,7 +4920,8 @@ components:
       description: |
         An owner invitation issued by a machine owner. It reuses the existing
         invitation lifecycle: single use, email-match on acceptance, and a
-        bounded expiry. Accepting it never demotes the machine owner.
+        bounded expiry. Accepting it never demotes the machine owner. An open
+        claim (1.10.0) has no address to match; see `email`.
       required:
         [
           id,
@@ -4929,10 +4943,16 @@ components:
           format: uuid
           description: Organization derived from the authenticated machine owner.
         email:
-          type: string
+          type: [string, "null"]
           minLength: 1
           maxLength: 254
-          description: Lowercased address that must sign in to accept this claim.
+          description: |
+            Lowercased address that must sign in to accept this claim. For an
+            open claim (created without an address, 1.10.0) it is null while
+            the claim is pending or revoked, and the verified address that
+            accepted it once accepted. Only a claim created by a 1.10.0 client
+            is ever open, so a workspace whose clients predate 1.10.0 never
+            reports null here.
         role:
           type: string
           const: owner
@@ -4969,7 +4989,10 @@ components:
     CreateWorkspaceClaimInput:
       type: object
       additionalProperties: false
-      required: [email]
+      description: |
+        With `email`, a claim only that address can accept. Without it
+        (1.10.0), an open claim: a single-use link any signed-in person with a
+        verified email may accept once.
       properties:
         email:
           type: string
@@ -4984,7 +5007,8 @@ components:
             dots, and at least one dot is required. Uppercase is rejected rather
             than folded so the stored address matches the one that signs in.
             The caller delivers the returned claim URL; an installation may also
-            email it to this address (see `emailed` on the result).
+            email it to this address (see `emailed` on the result). Omit it to
+            issue an open claim.
           examples:
             - gabriel@acme.com
             - gabriel+claims@mail.acme.co.uk
