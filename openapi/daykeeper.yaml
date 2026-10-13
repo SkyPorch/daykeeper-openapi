@@ -5276,7 +5276,9 @@ components:
     WebClientInput:
       type: object
       additionalProperties: false
-      description: The whole web messenger setting. Omitted optional fields are cleared.
+      description: |
+        The whole web messenger setting. An omitted `greeting` or `accentColor`
+        is cleared; an omitted `displayName` is kept (send `null` to clear it).
       required: [state, allowedOrigins]
       properties:
         state:
@@ -5328,7 +5330,11 @@ components:
             `displayName` is kept, so a writer built against an earlier
             contract never clears a name it does not know about. Servers before
             1.10.0 reject the field, so send it only when the GET response
-            carries `displayName`. Messengers show it as plain text.
+            carries `displayName`. Before the first PUT there is nothing to GET
+            (404); to create a web client with a name against a server of
+            unknown version, create it without `displayName`, then PUT again
+            with it once the response carries the field. Messengers show it as
+            plain text.
     RotateWebClientPublishableKeyInput:
       type: object
       additionalProperties: false

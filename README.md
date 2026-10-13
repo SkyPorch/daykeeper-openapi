@@ -311,7 +311,9 @@ already trimmed, no control characters) and `null` clears it. Unlike
 built against `1.9.0` and earlier send whole settings without it, and they
 must not clear a name they cannot see. Servers from `1.10.0` always return
 `displayName`, null when unset; earlier servers omit it and reject it on
-`PUT`, so send it only to a server whose GET carried it. The response schema
+`PUT`, so send it only to a server whose GET carried it. A web client that
+does not exist yet has nothing to GET; create it without `displayName`, then
+send the name in a second `PUT` once the response carries the field. The response schema
 leaves it optional for those earlier servers. One optional request and
 response field, with existing requests meaning what they meant, is a minor bump
 under [`VERSIONING.md`](VERSIONING.md), so `info.version` moves from `1.9.0` to

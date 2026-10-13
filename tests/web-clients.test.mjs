@@ -205,6 +205,13 @@ test("request bodies are closed, the WebClient response is open", () => {
   assert.equal(name.maxLength, 60);
   assert.ok(!input.required.includes("displayName"));
   assert.match(name.description, /an omitted\s+`displayName` is kept/);
+  // The schema-level summary states the same exception.
+  assert.match(input.description, /an omitted `displayName` is kept/);
+  // And there is a compatible way to create one with a name.
+  assert.match(
+    name.description,
+    /create it without `displayName`, then\s+PUT again/,
+  );
   const namePattern = new RegExp(name.pattern);
   for (const value of ["Warlord Cards", "A", "Café & Co.", "x".repeat(60)])
     assert.match(value, namePattern);
