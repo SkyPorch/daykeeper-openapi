@@ -112,7 +112,11 @@ test("workspace claims are machine-owner scoped, idempotent, and non-cacheable",
   assert.deepEqual(collection.post.parameters, [
     { $ref: "#/components/parameters/IdempotencyKey" },
   ]);
-  assert.equal(collection.get.parameters, undefined);
+  // 1.10.0: the list's only parameter is the opt-in for open claims.
+  assert.deepEqual(
+    collection.get.parameters.map((parameter) => parameter.name),
+    ["include"],
+  );
   assert.deepEqual(revoke.parameters, [
     { $ref: "#/components/parameters/WorkspaceClaimId" },
   ]);
@@ -297,7 +301,17 @@ test("the claim list is unbounded and documents its own ordering", () => {
   assert.match(items.description, /hourly/);
   const list = contract.paths["/v1/workspace-claims"].get;
   assert.match(list.description, /no pagination in\s+v1/);
-  assert.equal(list.parameters, undefined);
+  // 1.10.0: the only selector is the opt-in for open claims.
+  assert.deepEqual(
+    list.parameters.map((parameter) => [
+      parameter.name,
+      parameter.in,
+      parameter.required,
+      parameter.schema.enum,
+    ]),
+    [["include", "query", false, ["open"]]],
+  );
+  assert.match(list.description, /include=open/);
 });
 
 test("the email pattern accepts real addresses and rejects malformed ones", () => {

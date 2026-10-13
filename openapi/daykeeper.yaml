@@ -2420,7 +2420,13 @@ paths:
       description: |
         Requires a machine-owner credential with daykeeper.accounts:read. The
         organization comes only from the verified machine owner; no
-        organization, pagination, or filter selector is accepted.
+        organization or pagination selector is accepted.
+
+        Open claims nobody has accepted yet (1.10.0) have no address. They
+        are listed only when the request asks with `include=open`, so a client
+        generated before 1.10.0, which expects every listed claim to carry an
+        address, never receives one. An accepted open claim carries the
+        accepting address and is always listed.
 
         The response returns every pending, accepted and revoked claim for the
         organization in one page, ordered newest first. Expired claims are
@@ -2435,9 +2441,19 @@ paths:
       security:
         - daykeeperMachineOwner: []
       x-daykeeper-required-scopes: [daykeeper.accounts:read]
+      parameters:
+        - name: include
+          in: query
+          required: false
+          description: |
+            `open` also lists open claims nobody has accepted yet, whose
+            `email` is null (1.10.0). Any other value is rejected.
+          schema:
+            type: string
+            enum: [open]
       responses:
         "200":
-          description: Every pending, accepted and revoked claim for the authenticated organization, expired claims hidden, newest first.
+          description: Every pending, accepted and revoked claim for the authenticated organization, expired claims hidden, newest first; open claims nobody accepted only with `include=open`.
           headers:
             Cache-Control:
               schema: { type: string, const: no-store }
@@ -4950,9 +4966,11 @@ components:
             Lowercased address that must sign in to accept this claim. For an
             open claim (created without an address, 1.10.0) it is null while
             the claim is pending or revoked, and the verified address that
-            accepted it once accepted. Only a claim created by a 1.10.0 client
-            is ever open, so a workspace whose clients predate 1.10.0 never
-            reports null here.
+            accepted it once accepted. Null is only ever returned to a 1.10.0
+            client: in the create result for an open claim, in a revoke of one
+            (whose id only that client holds), and in a list requested with
+            `include=open`. A client generated before 1.10.0 never receives
+            it.
         role:
           type: string
           const: owner
