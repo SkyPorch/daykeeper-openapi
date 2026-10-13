@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Daykeeper Management API
-  version: 1.9.0
+  version: 1.10.0
   summary: Safe, multi-tenant support administration for people and agents.
   description: |
     Daykeeper owns tenant lifecycle, support-channel provisioning, durable
@@ -1004,6 +1004,7 @@ paths:
                       previousKeyExpiresAt: null
                       greeting: Hi! How can we help?
                       accentColor: "#336699"
+                      displayName: Example Shop
                       trafficEnabled: true
                       snippet: |-
                         <script>window.Daykeeper=window.Daykeeper||function(){(Daykeeper.q=Daykeeper.q||[]).push(arguments)};
@@ -1035,7 +1036,8 @@ paths:
         being deleted.
 
         The body replaces the whole setting: an omitted `greeting` or
-        `accentColor` is cleared, not kept. The first successful PUT for a
+        `accentColor` is cleared, not kept. `displayName` is the exception:
+        omitted, it is kept; `null` clears it. The first successful PUT for a
         tenant mints its publishable key and answers 201; later PUTs answer
         200 and keep the key (use the rotate operation to change it). A PUT
         that changes nothing leaves `version` as it was.
@@ -1082,6 +1084,7 @@ paths:
                     [https://www.example.test, https://example.test]
                   greeting: Hi! How can we help?
                   accentColor: "#336699"
+                  displayName: Example Shop
       responses:
         "200":
           description: The existing web client was replaced (or was already equal); its publishable key is unchanged.
@@ -1111,7 +1114,7 @@ paths:
                 $ref: "#/components/schemas/WebClientResponse"
         "400":
           $ref: "#/components/responses/Error"
-          description: The body, an origin, the greeting or the accent color is invalid, or the If-Match / If-None-Match headers are malformed or sent together (INVALID_INPUT).
+          description: The body, an origin, the greeting, the accent color or the display name is invalid, or the If-Match / If-None-Match headers are malformed or sent together (INVALID_INPUT).
         "401":
           $ref: "#/components/responses/Error"
         "403":
@@ -5246,6 +5249,16 @@ components:
           type: [string, "null"]
           pattern: "^#[0-9a-f]{6}$"
           description: Lowercase `#rrggbb`, or null for the default.
+        displayName:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 60
+          description: |
+            The name the messenger shows customers in its header, or null to
+            show the tenant's name. New in 1.10.0. Servers from 1.10.0 always
+            send it, null when unset; it is not required here only because
+            earlier servers omit it. Its presence is how a client knows the
+            server accepts `displayName` on PUT.
         trafficEnabled:
           type: boolean
           description: True when `state` is enabled and the tenant's API inbox is live for customer traffic.
@@ -5301,6 +5314,21 @@ components:
           type: string
           pattern: "^#[0-9a-fA-F]{6}$"
           description: A `#rrggbb` hex color, stored lowercase.
+        displayName:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 60
+          # No leading or trailing whitespace and no control characters.
+          pattern: '^[^\s\x00-\x1f\x7f-\x9f](?:[^\x00-\x1f\x7f-\x9f]*[^\s\x00-\x1f\x7f-\x9f])?$'
+          description: |
+            The name customers see in the messenger's header, like "Warlord
+            Cards". A string sets it: 1 to 60 characters, already trimmed, with
+            no control characters. `null` clears it, so the messenger shows the
+            tenant's name. Unlike `greeting` and `accentColor`, an omitted
+            `displayName` is kept, so a writer built against an earlier
+            contract never clears a name it does not know about. Servers before
+            1.10.0 reject the field, so send it only when the GET response
+            carries `displayName`. Messengers show it as plain text.
     RotateWebClientPublishableKeyInput:
       type: object
       additionalProperties: false
