@@ -69,9 +69,9 @@ after(() => {
   if (directory) rmSync(directory, { recursive: true, force: true });
 });
 
-test("the contract version is 1.9.0", () => {
-  // 1.9.0 adds the Dashboard management operations and pagination.
-  assert.equal(contract.info.version, "1.9.0");
+test("the contract version is 1.10.0", () => {
+  // 1.10.0 adds the web messenger's optional displayName.
+  assert.equal(contract.info.version, "1.10.0");
 });
 
 test("web-client operations exist with the right scopes and tag", () => {
@@ -125,6 +125,11 @@ test("the first PUT creates (201), later PUTs replace (200)", () => {
   assert.match(
     put.description,
     /omitted `greeting` or\s+`accentColor` is cleared/,
+  );
+  // An omitted displayName is kept, so pre-1.10.0 writers never clear it.
+  assert.match(
+    put.description,
+    /`displayName` is the exception:\s+omitted, it is kept; `null` clears it/,
   );
   assert.match(
     put.description,
@@ -192,6 +197,37 @@ test("request bodies are closed, the WebClient response is open", () => {
   // The documented greeting limit is the schema's limit.
   assert.equal(input.properties.greeting.maxLength, 280);
   assert.equal(input.properties.accentColor.pattern, "^#[0-9a-fA-F]{6}$");
+  // displayName: optional on both sides, 1-60, trimmed, no controls; null
+  // clears, omitted keeps.
+  const name = input.properties.displayName;
+  assert.deepEqual(name.type, ["string", "null"]);
+  assert.equal(name.minLength, 1);
+  assert.equal(name.maxLength, 60);
+  assert.ok(!input.required.includes("displayName"));
+  assert.match(name.description, /an omitted\s+`displayName` is kept/);
+  // The schema-level summary states the same exception.
+  assert.match(input.description, /an omitted `displayName` is kept/);
+  // And there is a compatible way to create one with a name.
+  assert.match(
+    name.description,
+    /create it without `displayName`, then\s+PUT again/,
+  );
+  const namePattern = new RegExp(name.pattern);
+  for (const value of ["Warlord Cards", "A", "Café & Co.", "x".repeat(60)])
+    assert.match(value, namePattern);
+  for (const value of [
+    " ",
+    " padded",
+    "padded ",
+    "two\nlines",
+    "nul\u0000",
+    "tab\t",
+  ])
+    assert.doesNotMatch(value, namePattern);
+  const output = schemas.WebClient.properties.displayName;
+  assert.deepEqual(output.type, ["string", "null"]);
+  assert.equal(output.maxLength, 60);
+  assert.ok(!schemas.WebClient.required.includes("displayName"));
   const rotate = schemas.RotateWebClientPublishableKeyInput;
   assert.equal(rotate.additionalProperties, false);
   assert.deepEqual(rotate.required, ["graceSeconds"]);
