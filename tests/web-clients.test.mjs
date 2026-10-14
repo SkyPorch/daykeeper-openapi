@@ -69,9 +69,9 @@ after(() => {
   if (directory) rmSync(directory, { recursive: true, force: true });
 });
 
-test("the contract version is 1.10.0", () => {
-  // 1.10.0 adds the web messenger's optional displayName.
-  assert.equal(contract.info.version, "1.10.0");
+test("the contract version is 1.11.0", () => {
+  // 1.11.0 adds optional host-app contact technical context.
+  assert.equal(contract.info.version, "1.11.0");
 });
 
 test("web-client operations exist with the right scopes and tag", () => {
