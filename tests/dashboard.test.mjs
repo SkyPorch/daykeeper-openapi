@@ -488,6 +488,14 @@ test("customer sessions document bounded, optional host-app technical context", 
   const schema = contract.components.schemas.CreateCustomerSessionInput;
   assert.equal(schema.additionalProperties, false);
   assert.deepEqual(schema.properties.platform.enum, ["ios", "android", "web"]);
+  assert.match(
+    schema.properties.platform.description,
+    /most recent known value observed by the gateway replaces this field/,
+  );
+  assert.match(
+    schema.properties.platform.description,
+    /omitted fields retain their previous values across devices/,
+  );
   for (const field of [
     "deviceBrand",
     "deviceModel",

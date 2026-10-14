@@ -3844,7 +3844,7 @@ components:
         platform:
           type: string
           enum: [ios, android, web]
-          description: Optional host-app platform for customer sessions only. Omit when unknown.
+          description: Optional host-app platform for customer sessions only. Omit when unknown. The most recent known value observed by the gateway replaces this field; omitted fields retain their previous values across devices.
         deviceBrand:
           type: string
           minLength: 1
