@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Daykeeper Management API
-  version: 1.10.0
+  version: 1.11.0
   summary: Safe, multi-tenant support administration for people and agents.
   description: |
     Daykeeper owns tenant lifecycle, support-channel provisioning, durable
@@ -3841,6 +3841,40 @@ components:
           type: string
           enum: [stripe, apple_iap, android_iap, none]
           description: Omit when unknown. The explicit none value means the caller knows the customer has no payment provider.
+        platform:
+          type: string
+          enum: [ios, android, web]
+          description: Optional host-app platform for customer sessions only. Omit when unknown. The most recent known value observed by the gateway replaces this field; omitted fields retain their previous values across devices.
+        deviceBrand:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Device manufacturer reported by the host app; never a unique device identifier. Customer sessions only; omit when unknown. The most recent known value observed by the gateway replaces this field; omitted fields retain their previous values across devices.
+        deviceModel:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Device model reported by the host app; never a unique device identifier. Customer sessions only; omit when unknown. The most recent known value observed by the gateway replaces this field; omitted fields retain their previous values across devices.
+        osName:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Operating system name reported by the host app, such as iOS or Android. Customer sessions only; omit when unknown. The most recent known value observed by the gateway replaces this field; omitted fields retain their previous values across devices.
+        osVersion:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Operating system version reported by the host app. Customer sessions only; omit when unknown. The most recent known value observed by the gateway replaces this field; omitted fields retain their previous values across devices.
+        appVersion:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Host application version, not the Daykeeper SDK version. Customer sessions only; omit when unknown. The most recent known value observed by the gateway replaces this field; omitted fields retain their previous values across devices.
+        appBuild:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Host application build number or label, not the Daykeeper SDK build. Customer sessions only; omit when unknown. The most recent known value observed by the gateway replaces this field; omitted fields retain their previous values across devices.
         erasureTargetHash:
           type: string
           minLength: 43
