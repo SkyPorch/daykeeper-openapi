@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Daykeeper Customer API
-  version: 0.1.0
+  version: 0.2.0
   summary: Customer conversation access through a tenant-safe Daykeeper gateway.
   description: |
     This API is safe for a customer-facing browser when the consuming
@@ -36,6 +36,8 @@ security:
   - customerToken: []
 paths:
   /v1/identity:
+    parameters:
+      - $ref: "#/components/parameters/DaykeeperClient"
     get:
       operationId: getCustomerIdentity
       summary: Get widget-safe customer identity
@@ -58,6 +60,8 @@ paths:
         default:
           $ref: "#/components/responses/Error"
   /v1/conversations:
+    parameters:
+      - $ref: "#/components/parameters/DaykeeperClient"
     get:
       operationId: listCustomerConversations
       summary: List the customer's conversations
@@ -89,6 +93,8 @@ paths:
         default:
           $ref: "#/components/responses/Error"
   /v1/unread:
+    parameters:
+      - $ref: "#/components/parameters/DaykeeperClient"
     get:
       operationId: getCustomerUnread
       summary: Get customer-side unread state
@@ -108,6 +114,7 @@ paths:
   "/v1/conversations/{conversationId}/seen":
     parameters:
       - $ref: "#/components/parameters/ConversationId"
+      - $ref: "#/components/parameters/DaykeeperClient"
     post:
       operationId: markCustomerConversationSeen
       summary: Mark a customer conversation seen
@@ -126,6 +133,7 @@ paths:
   "/v1/conversations/{conversationId}/messages":
     parameters:
       - $ref: "#/components/parameters/ConversationId"
+      - $ref: "#/components/parameters/DaykeeperClient"
     get:
       operationId: listCustomerMessages
       summary: List visible messages in a customer conversation
@@ -172,6 +180,8 @@ paths:
         default:
           $ref: "#/components/responses/Error"
   /v1/anonymous-conversations/claim:
+    parameters:
+      - $ref: "#/components/parameters/DaykeeperClient"
     post:
       operationId: claimAnonymousConversation
       summary: Claim a signed-out widget conversation after sign-in
@@ -279,6 +289,67 @@ components:
       bearerFormat: JWT
       description: Short-lived token bound to one tenant and one stable customer subject.
   parameters:
+    DaykeeperClient:
+      name: Daykeeper-Client
+      in: header
+      required: false
+      description: |
+        What the calling SDK knows about the device it runs on: base64url
+        (no padding) of a UTF-8 JSON object. Daykeeper SDKs send it by default
+        so agents see the app, device and OS on the contact without host code.
+        It is presentation context, never authorization: a value the host
+        backend signed into the customer token wins field by field, and the
+        gateway drops any field that fails its check (and ignores the whole
+        header when it is longer than 4096 characters or not an object),
+        without failing the request. Contacts are updated when they are
+        resolved to list, create or claim conversations; unread and seen
+        polling never write it.
+      schema:
+        type: string
+        maxLength: 4096
+        pattern: "^[A-Za-z0-9_-]+$"
+      x-daykeeper-decoded-schema:
+        type: object
+        description: |
+          The decoded `Daykeeper-Client` header. Every field is optional; an SDK
+          omits what its platform cannot answer and never sends identifiers,
+          advertising IDs, location, URLs or full user-agent strings.
+        additionalProperties: true
+        properties:
+          sdk:
+            type: string
+            pattern: "^[a-z0-9][a-z0-9.-]*$"
+            maxLength: 40
+            examples: [react-native, ios, android, web, web-messenger]
+          sdkVersion:
+            type: string
+            pattern: "^[0-9A-Za-z.+-]+$"
+            maxLength: 40
+          platform:
+            type: string
+            enum: [ios, android, web]
+          osName: { type: string, maxLength: 100, examples: [iOS] }
+          osVersion: { type: string, maxLength: 100, examples: ["26.6.1"] }
+          deviceBrand: { type: string, maxLength: 100, examples: [Apple] }
+          deviceModel:
+            { type: string, maxLength: 100, examples: ["iPhone17,1"] }
+          appName: { type: string, maxLength: 200 }
+          appId:
+            type: string
+            pattern: "^[A-Za-z0-9._-]+$"
+            maxLength: 200
+          appVersion: { type: string, maxLength: 100 }
+          appBuild: { type: string, maxLength: 100 }
+          locale:
+            type: string
+            description: BCP 47 language tag of the device.
+            maxLength: 35
+          timeZone:
+            type: string
+            description: IANA time zone identifier.
+            maxLength: 64
+          browserName: { type: string, maxLength: 100 }
+          browserVersion: { type: string, maxLength: 100 }
     ConversationId:
       name: conversationId
       in: path
