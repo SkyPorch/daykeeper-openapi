@@ -1,5 +1,7 @@
 # Daykeeper OpenAPI
 
+Learn more about Daykeeper at [mydaykeeper.com](https://www.mydaykeeper.com).
+
 The canonical, versioned API contracts for Daykeeper:
 
 - [`openapi/daykeeper.yaml`](openapi/daykeeper.yaml) is the server-side
@@ -25,7 +27,9 @@ Operator conversation replies use `daykeeper.conversations:write` and return
 `201` when accepted. If a reply fails after dispatch, the error may include
 `outcomeUnknown: true`; inspect the conversation and messages before deciding
 whether to repeat the request. Clients must not automatically retry uncertain
-replies.
+replies. From `1.9.0` a reply may carry a UUID `Idempotency-Key`, and
+repeating the exact request with the same key returns the original message
+without sending a duplicate (see below).
 
 ## Unreleased entitlement contract
 
@@ -226,7 +230,8 @@ requires an `Idempotency-Key` and a machine-owner credential with
 `replayed: false` and reveals `token` and `claimUrl` exactly once; an exact
 repeat answers `200` with `replayed: true` and both fields `null`. The token
 rides in the URL fragment, so it never reaches server logs or referrers, and
-Daykeeper sends no email: the caller delivers the URL. Never log or persist it.
+the caller delivers the URL; from `1.8.0` an installation may also email it
+(see "Unreleased workspace claim email" below). Never log or persist it.
 
 The two success bodies are separate schemas rather than one loose shape.
 `WorkspaceClaimCreated` is the `201` body: a non-null `token` and `claimUrl`
@@ -256,6 +261,98 @@ workspace. Under [`VERSIONING.md`](VERSIONING.md) these additive endpoints and
 the optional capability field are a minor bump, so `info.version` moves from
 `1.2.0` to `1.3.0`. This source change publishes no tag, enables no server
 feature, and grants no deployment or SDK release approval.
+
+## Unreleased web messenger
+
+Contract `1.7.0` documents the web-client resource a tenant's web messenger
+boots from. `GET /v1/tenants/{tenantId}/web-client` (`daykeeper.accounts:read`)
+returns the allowed websites, the publishable key, the install snippet and a
+`version`, sent as `ETag`. `PUT` (`daykeeper.accounts:write`) replaces the
+whole setting; the first PUT mints the key and answers `201`, later ones answer
+`200` and keep it. `POST .../web-client/publishable-key:rotate` mints a new key
+and keeps the previous one working for `graceSeconds` (at most seven days).
+The publishable key is a public identifier, not a secret: the Origin check
+against `allowedOrigins` is what keeps other websites out. Check
+`capabilities.webClients` first; `enabled: false` means the routes answer
+`FEATURE_UNAVAILABLE` (409), and `loopbackOrigins` says whether
+`http://localhost` origins are accepted.
+
+A PUT with no precondition is unconditional. A writer that can race another
+sends `If-Match: <version>` to replace only that version, or `If-None-Match: *`
+to create only; either answers `VERSION_CONFLICT` (412) when the stored state
+differs and writes nothing. `If-None-Match: *` is new in `1.7.0` and servers
+before it ignore the header, so a create-only caller should also confirm the
+`201`. The GET, PUT and rotate operations shipped before this contract and are
+documented as deployed; every addition is optional, so this is a minor bump.
+
+## Unreleased workspace claim email
+
+Contract `1.8.0` adds an optional boolean `emailed` to both workspace claim
+results. Only an installation configured to email claim links sends it: on a
+fresh `201` it says whether this request emailed the claim URL to the claimed
+address, and on a replay `200` it is always `false` (a replay sends nothing).
+Installations that do not email claims, the default, and servers before
+`1.8.0` omit it, so their results keep the `1.7.0` shape exactly. The result
+schemas keep `additionalProperties: false`, so a client that validates
+strictly against `1.7.0` would refuse the new field: operators must upgrade
+clients to `1.8.0` before turning claim emails on. The email carries the link and
+its expiry and no text the agent chose, and a failed send never fails the
+claim. One optional response field is a minor bump under
+[`VERSIONING.md`](VERSIONING.md), so `info.version` moves from `1.7.0` to
+`1.8.0`.
+
+## Unreleased web messenger display name
+
+Contract `1.10.0` adds an optional `displayName` to the web-client resource:
+the name customers see in the messenger's header, like "Warlord Cards",
+instead of the tenant's name. On `PUT`, a string sets it (1 to 60 characters,
+already trimmed, no control characters) and `null` clears it. Unlike
+`greeting` and `accentColor`, an omitted `displayName` is **kept**: writers
+built against `1.9.0` and earlier send whole settings without it, and they
+must not clear a name they cannot see. Servers from `1.10.0` always return
+`displayName`, null when unset; earlier servers omit it and reject it on
+`PUT`, so send it only to a server whose GET carried it. A web client that
+does not exist yet has nothing to GET; create it without `displayName`, then
+send the name in a second `PUT` once the response carries the field. The response schema
+leaves it optional for those earlier servers. One optional request and
+response field, with existing requests meaning what they meant, is a minor bump
+under [`VERSIONING.md`](VERSIONING.md), so `info.version` moves from `1.9.0` to
+`1.10.0`.
+
+## Unreleased Dashboard management API
+
+Contract `1.9.0` documents what the Daykeeper Dashboard (the ChatGPT app served
+by `daykeeper-mcp`) reads and changes. Every addition is optional, so this is a
+minor bump under [`VERSIONING.md`](VERSIONING.md).
+
+- `GET /v1/profile` and `GET /v1/workspaces` (`daykeeper.accounts:read`) return
+  the person and workspace bound to a human OAuth access token. The token
+  chooses the active workspace; the list cannot change it. Other credentials
+  receive `401`.
+- `GET /v1/tenants/{tenantId}/conversations/{conversationId}` reads one
+  conversation summary; `PATCH` on the same path sets `status` to `open` or
+  `resolved` (`daykeeper.conversations:write`) and answers only after the
+  server has confirmed the new status.
+- Conversation and message lists accept `limit` (1-100, default 50) and an
+  opaque `cursor`. Pagination is opt-in: a request that sends either gets
+  `page: { limit, nextCursor, hasMore }`; a request that sends neither gets the
+  1.8 representation with no `page`, so clients generated from earlier
+  contracts keep decoding it. Message pages start at the latest messages,
+  sorted oldest to newest; pass `nextCursor` unchanged for older ones. The
+  list schemas are now open (`additionalProperties: true`).
+- Replies accept an optional UUID `Idempotency-Key`. An exact replay returns
+  the original message with `200`; a reused key for a different request, or a
+  replay while the first attempt is in progress, answers `409`. Replies
+  without the header behave exactly as before.
+- `GET` and `POST /v1/tenants/{tenantId}/customer-email` expose the customer
+  email switch on the bearer API. Members with `daykeeper.accounts:read` read
+  it; only a human owner with `daykeeper.accounts:write` changes it.
+- Capabilities may report `operatorConversations` (`pagination`,
+  `statusUpdates` for both GET and PATCH on one conversation,
+  `idempotentReplies`), `customerEmail`, and `dashboardIdentity`. Absent
+  means the server predates the feature.
+- `daykeeperOAuth` documents the authorization code flow (PKCE) that issues
+  the human tokens these routes require, beside client credentials.
 
 ## Check and bundle
 

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Daykeeper Management API
-  version: 1.6.0
+  version: 1.10.0
   summary: Safe, multi-tenant support administration for people and agents.
   description: |
     Daykeeper owns tenant lifecycle, support-channel provisioning, durable
@@ -18,6 +18,10 @@ servers:
   - url: https://api.daykeeper.example
     description: Placeholder origin; SDK consumers configure their deployed Daykeeper origin.
 tags:
+  - name: Profile and workspaces
+    description: Identity and connected workspace for the authenticated person.
+  - name: Customer email
+    description: Human-owner settings for customer email updates.
   - name: Capabilities
     description: Runtime feature and schema discovery.
   - name: Entitlements
@@ -34,6 +38,8 @@ tags:
     description: Email-domain planning, DNS evidence, and round-trip readiness.
   - name: Website channels
     description: First-inbox preparation and observed installation readiness.
+  - name: Web messenger
+    description: Allowed websites and the publishable key a tenant's web messenger boots with.
   - name: Domain verification
     description: DNS observation and durable domain-proof evidence; never traffic activation.
   - name: API inbox activation
@@ -50,6 +56,60 @@ security:
   - daykeeperOAuth:
       - daykeeper.accounts:read
 paths:
+  /v1/profile:
+    get:
+      operationId: getProfile
+      summary: Read the authenticated person's profile and connected workspace
+      description: |
+        New in 1.9.0. Requires a human OAuth access token (authorization code
+        flow) issued for this API with daykeeper.accounts:read; server keys,
+        agent credentials, and
+        tokens issued for another resource receive 401. Returns only the
+        person and workspace bound to the access token. The caller cannot
+        select or change the active workspace through this endpoint.
+      tags: [Profile and workspaces]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:read]
+      responses:
+        "200":
+          description: The authenticated person's profile.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfileResponse"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/workspaces:
+    get:
+      operationId: listWorkspaces
+      summary: List workspaces available to the authenticated person
+      description: |
+        New in 1.9.0. Requires a human OAuth access token (authorization code
+        flow) issued for this API with daykeeper.accounts:read; other
+        credentials receive 401. The
+        current workspace remains the one bound to the access token. This list
+        cannot be used to change it; reconnect through the host to use another
+        workspace.
+      tags: [Profile and workspaces]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:read]
+      responses:
+        "200":
+          description: Workspaces available to the authenticated person.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceListResponse"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/capabilities:
     get:
       operationId: getCapabilities
@@ -896,6 +956,245 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
+  "/v1/tenants/{tenantId}/web-client":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      operationId: getWebClient
+      summary: Inspect the tenant's web messenger settings
+      description: |
+        Returns the websites allowed to open the tenant's web messenger, the
+        publishable key the messenger boots with, and the install snippet.
+        Requires daykeeper.accounts:read. A tenant-bound credential can read
+        only its own tenant.
+
+        An unknown tenant, another organization's tenant, and a tenant that has
+        never had a web client all answer RESOURCE_NOT_FOUND (404), so the
+        response does not disclose which. `ETag` carries the current `version`;
+        send it back as `If-Match` on the next PUT.
+      tags: [Web messenger]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:read]
+        - daykeeperServerKey: []
+        - daykeeperMachineOwner: []
+      x-daykeeper-required-scopes: [daykeeper.accounts:read]
+      responses:
+        "200":
+          description: The tenant's web client.
+          headers:
+            ETag:
+              $ref: "#/components/headers/WebClientETag"
+            Cache-Control:
+              schema: { type: string, const: no-store }
+            Daykeeper-Credential-Expires-At:
+              $ref: "#/components/headers/DaykeeperCredentialExpiresAt"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebClientResponse"
+              examples:
+                enabled:
+                  value:
+                    data:
+                      tenantId: "20000000-0000-4000-8000-000000000001"
+                      state: enabled
+                      allowedOrigins:
+                        [https://example.test, https://www.example.test]
+                      publishableKey: dk_pk_AbCdEfGhIjKlMnOpQrStUvWxYz012345
+                      previousKeyExpiresAt: null
+                      greeting: Hi! How can we help?
+                      accentColor: "#336699"
+                      displayName: Example Shop
+                      trafficEnabled: true
+                      snippet: |-
+                        <script>window.Daykeeper=window.Daykeeper||function(){(Daykeeper.q=Daykeeper.q||[]).push(arguments)};
+                        Daykeeper('boot',{publishableKey:'dk_pk_AbCdEfGhIjKlMnOpQrStUvWxYz012345'});</script>
+                        <script async src="https://cdn.mydaykeeper.com/messenger/v1/messenger.js"></script>
+                      version: 3
+        "400":
+          $ref: "#/components/responses/Error"
+          description: The tenant id is not a UUID (INVALID_INPUT).
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+          description: The credential lacks daykeeper.accounts:read (SCOPE_REQUIRED).
+        "404":
+          $ref: "#/components/responses/Error"
+          description: No such tenant in the caller's organization, or the tenant has no web client (RESOURCE_NOT_FOUND).
+        "409":
+          $ref: "#/components/responses/Error"
+          description: Web clients are not enabled on this deployment (FEATURE_UNAVAILABLE).
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: putWebClient
+      summary: Create or replace the tenant's web messenger settings
+      description: |
+        Requires daykeeper.accounts:write. A tenant-bound credential can write
+        only its own tenant. The tenant must have an API inbox that is not
+        being deleted.
+
+        The body replaces the whole setting: an omitted `greeting` or
+        `accentColor` is cleared, not kept. `displayName` is the exception:
+        omitted, it is kept; `null` clears it. The first successful PUT for a
+        tenant mints its publishable key and answers 201; later PUTs answer
+        200 and keep the key (use the rotate operation to change it). A PUT
+        that changes nothing leaves `version` as it was.
+
+        Concurrency. Without a precondition the PUT is unconditional: it
+        creates the web client if there is none and otherwise replaces it,
+        whoever wrote it last. A writer that may race another must send one of:
+        - `If-Match: <version>` (the `ETag` from the last read or write) to
+          replace only that version. A different stored version, or no web
+          client at all, answers VERSION_CONFLICT (412).
+        - `If-None-Match: *` to create only. If a web client already exists
+          the request answers VERSION_CONFLICT (412) and nothing changes; read
+          it and retry with `If-Match`.
+
+        Sending both headers, an `If-None-Match` other than `*`, or a
+        malformed `If-Match` is rejected with INVALID_INPUT (400).
+        `If-None-Match: *` is new in contract 1.7.0; a server that predates it
+        ignores the header, so check that the response status is 201 before
+        relying on it having created the web client.
+
+        Origins are normalized (lowercase host, default port and trailing
+        slash removed), checked for duplicates after normalization, and
+        returned sorted.
+      tags: [Web messenger]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:write]
+        - daykeeperServerKey: []
+        - daykeeperMachineOwner: []
+      x-daykeeper-required-scopes: [daykeeper.accounts:write]
+      parameters:
+        - $ref: "#/components/parameters/WebClientIfMatch"
+        - $ref: "#/components/parameters/WebClientIfNoneMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebClientInput"
+            examples:
+              enabled:
+                value:
+                  state: enabled
+                  allowedOrigins:
+                    [https://www.example.test, https://example.test]
+                  greeting: Hi! How can we help?
+                  accentColor: "#336699"
+                  displayName: Example Shop
+      responses:
+        "200":
+          description: The existing web client was replaced (or was already equal); its publishable key is unchanged.
+          headers:
+            ETag:
+              $ref: "#/components/headers/WebClientETag"
+            Cache-Control:
+              schema: { type: string, const: no-store }
+            Daykeeper-Credential-Expires-At:
+              $ref: "#/components/headers/DaykeeperCredentialExpiresAt"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebClientResponse"
+        "201":
+          description: The web client was created and its publishable key minted.
+          headers:
+            ETag:
+              $ref: "#/components/headers/WebClientETag"
+            Cache-Control:
+              schema: { type: string, const: no-store }
+            Daykeeper-Credential-Expires-At:
+              $ref: "#/components/headers/DaykeeperCredentialExpiresAt"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebClientResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+          description: The body, an origin, the greeting, the accent color or the display name is invalid, or the If-Match / If-None-Match headers are malformed or sent together (INVALID_INPUT).
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+          description: The credential lacks daykeeper.accounts:write (SCOPE_REQUIRED).
+        "404":
+          $ref: "#/components/responses/Error"
+          description: No such tenant in the caller's organization (RESOURCE_NOT_FOUND).
+        "409":
+          $ref: "#/components/responses/Error"
+          description: The tenant has no API inbox or is being deleted (RESOURCE_STATE_CONFLICT), or web clients are not enabled on this deployment (FEATURE_UNAVAILABLE).
+        "412":
+          $ref: "#/components/responses/Error"
+          description: The If-Match version is not the stored one, If-Match was sent and no web client exists, or If-None-Match is `*` and a web client exists (VERSION_CONFLICT). Nothing was written.
+        default:
+          $ref: "#/components/responses/Error"
+  "/v1/tenants/{tenantId}/web-client/publishable-key:rotate":
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    post:
+      operationId: rotateWebClientPublishableKey
+      summary: Replace the web messenger's publishable key
+      description: |
+        Requires daykeeper.accounts:write. Mints a new publishable key and
+        increments `version`. The previous key keeps working for
+        `graceSeconds` (at most 604800, seven days) and its end is reported as
+        `previousKeyExpiresAt`; `graceSeconds: 0` stops it at once. Only one
+        previous key is kept: rotating again during a grace period stops the
+        older previous key at once.
+
+        The key is a public identifier, not a secret: what keeps other
+        websites out is the Origin check against `allowedOrigins`. This
+        operation takes no precondition header and is not idempotent: each
+        call mints a new key.
+      tags: [Web messenger]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:write]
+        - daykeeperServerKey: []
+        - daykeeperMachineOwner: []
+      x-daykeeper-required-scopes: [daykeeper.accounts:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RotateWebClientPublishableKeyInput"
+            examples:
+              oneDayGrace:
+                value:
+                  graceSeconds: 86400
+      responses:
+        "200":
+          description: The web client with its new publishable key.
+          headers:
+            ETag:
+              $ref: "#/components/headers/WebClientETag"
+            Cache-Control:
+              schema: { type: string, const: no-store }
+            Daykeeper-Credential-Expires-At:
+              $ref: "#/components/headers/DaykeeperCredentialExpiresAt"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebClientResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+          description: The body is invalid (INVALID_INPUT).
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+          description: The credential lacks daykeeper.accounts:write (SCOPE_REQUIRED).
+        "404":
+          $ref: "#/components/responses/Error"
+          description: No such tenant in the caller's organization, or the tenant has no web client (RESOURCE_NOT_FOUND).
+        "409":
+          $ref: "#/components/responses/Error"
+          description: The tenant is being deleted (RESOURCE_STATE_CONFLICT), or web clients are not enabled on this deployment (FEATURE_UNAVAILABLE).
+        default:
+          $ref: "#/components/responses/Error"
   "/v1/tenants/{tenantId}/domain-verifications":
     parameters:
       - $ref: "#/components/parameters/TenantId"
@@ -1329,13 +1628,33 @@ paths:
         Requires daykeeper.conversations:read. The tenant is selected only by
         the authenticated principal and path; provider credentials and
         provider-internal identifiers are never returned. Results are bounded
-        to 100 conversations. This is a read-only operation.
+        to 100 conversations, newest activity first. This is a read-only
+        operation.
+
+        Pagination is opt-in from 1.9.0. A request that sends `limit` or
+        `cursor` receives a page of at most `limit` (default 50) conversations
+        and a `page` object; pass `page.nextCursor` unchanged to continue the
+        same tenant's list until it is null. A request that sends neither
+        receives the 1.8 representation: no `page` member and one bounded
+        list, so a client generated from an earlier contract keeps decoding
+        it. Servers before 1.9.0 ignore both parameters and never send
+        `page`.
       tags: [Operator conversations]
       security:
         - daykeeperOAuth: [daykeeper.conversations:read]
         - daykeeperServerKey: []
       parameters:
         - $ref: "#/components/parameters/TenantId"
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque `page.nextCursor` from the previous page, passed unchanged.
+          schema: { type: string, minLength: 1, maxLength: 256 }
+        - name: limit
+          in: query
+          required: false
+          description: Maximum items on this page. Defaults to 50.
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
       responses:
         "200":
           description: Bounded tenant conversation list.
@@ -1348,6 +1667,77 @@ paths:
                 $ref: "#/components/schemas/OperatorConversationListResponse"
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/tenants/{tenantId}/conversations/{conversationId}:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+      - name: conversationId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+    get:
+      operationId: getOperatorConversation
+      summary: Read one support conversation
+      description: |
+        New in 1.9.0. Requires daykeeper.conversations:read and returns one
+        tenant-bound conversation summary. A conversation in another tenant
+        answers 404. This is a read-only operation.
+      tags: [Operator conversations]
+      security:
+        - daykeeperOAuth: [daykeeper.conversations:read]
+        - daykeeperServerKey: []
+      responses:
+        "200":
+          description: The requested conversation.
+          headers:
+            Daykeeper-Credential-Expires-At:
+              $ref: "#/components/headers/DaykeeperCredentialExpiresAt"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorConversationDetailResponse"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: setOperatorConversationStatus
+      summary: Set a support conversation's open or resolved status
+      description: |
+        New in 1.9.0. Requires daykeeper.conversations:write. Only the status
+        may be changed. Setting the status the conversation already has
+        changes nothing and returns the current summary. The server reads the
+        conversation again and confirms the requested status before answering
+        200; if it cannot confirm, the request fails and the caller should
+        read the conversation before repeating it.
+      tags: [Operator conversations]
+      security:
+        - daykeeperOAuth: [daykeeper.conversations:write]
+        - daykeeperServerKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OperatorConversationStatusInput"
+      responses:
+        "200":
+          description: The conversation now has the requested status.
+          headers:
+            Daykeeper-Credential-Expires-At:
+              $ref: "#/components/headers/DaykeeperCredentialExpiresAt"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorConversationStatusResponse"
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
   /v1/tenants/{tenantId}/conversations/{conversationId}/messages:
     parameters:
@@ -1363,11 +1753,32 @@ paths:
     get:
       operationId: listOperatorConversationMessages
       summary: Read messages for one support conversation
-      description: Requires daykeeper.conversations:read. Messages are bounded to 200 and provider internals are omitted.
+      description: |
+        Requires daykeeper.conversations:read. Messages are bounded to 200,
+        sorted oldest to newest, and provider internals are omitted.
+
+        Pagination is opt-in from 1.9.0. A request that sends `limit` or
+        `cursor` receives the latest messages (at most `limit`, default 50)
+        and a `page` object; `page.nextCursor` reads older messages until it
+        is null. A full provider batch keeps `hasMore` true conservatively, so
+        a final page may be empty. A request that sends neither receives the
+        1.8 representation with no `page` member. Servers before 1.9.0 ignore
+        both parameters and never send `page`.
       tags: [Operator conversations]
       security:
         - daykeeperOAuth: [daykeeper.conversations:read]
         - daykeeperServerKey: []
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque `page.nextCursor` from the previous page, passed unchanged.
+          schema: { type: string, minLength: 1, maxLength: 256 }
+        - name: limit
+          in: query
+          required: false
+          description: Maximum items on this page. Defaults to 50.
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
       responses:
         "200":
           description: Bounded conversation messages.
@@ -1387,14 +1798,34 @@ paths:
       summary: Send one plain-text support reply
       description: |
         Requires daykeeper.conversations:write. The server dispatches the
-        provider write once and does not automatically retry it. If the
-        response is lost, the caller must inspect the conversation before
-        deciding whether to repeat the request. Content is trimmed and limited
-        to 4,000 characters.
+        provider write once and does not automatically retry it. Content is
+        trimmed and limited to 4,000 characters.
+
+        Without `Idempotency-Key` (the behavior before 1.9.0, still accepted)
+        a lost response leaves the outcome unknown: inspect the conversation
+        and messages before deciding whether to repeat the request.
+
+        From 1.9.0 a caller may send a UUID `Idempotency-Key`. Repeating the
+        exact request (same tenant, conversation, and content) with the same
+        key returns the original message with 200 instead of sending a
+        duplicate. Reusing a key for a different request, or repeating it while
+        the first attempt is still in progress, answers 409. An error with
+        `outcomeUnknown: true` may be retried with the same key. An
+        installation without durable reply idempotency answers
+        FEATURE_UNAVAILABLE (503) to a request that carries the header; see
+        `operatorConversations.idempotentReplies` in capabilities.
       tags: [Operator conversations]
       security:
         - daykeeperOAuth: [daykeeper.conversations:write]
         - daykeeperServerKey: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: New in 1.9.0. UUID for one reply attempt. Reuse it only with the exact same conversation and body.
+          schema:
+            type: string
+            format: uuid
       requestBody:
         required: true
         content:
@@ -1402,6 +1833,15 @@ paths:
             schema:
               $ref: "#/components/schemas/OperatorReplyInput"
       responses:
+        "200":
+          description: The original reply, returned for an exact replay of an Idempotency-Key request. Nothing new was sent.
+          headers:
+            Daykeeper-Credential-Expires-At:
+              $ref: "#/components/headers/DaykeeperCredentialExpiresAt"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperatorConversationReplyResponse"
         "201":
           description: Reply accepted by the provider.
           headers:
@@ -1411,6 +1851,67 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OperatorConversationReplyResponse"
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/tenants/{tenantId}/customer-email:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      operationId: getCustomerEmail
+      summary: Read customer email settings
+      description: |
+        New in 1.9.0 on the bearer API. Requires daykeeper.accounts:read and
+        access to the tenant; workspace members can read the setting. A tenant
+        in another organization answers 404.
+      tags: [Customer email]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:read]
+      responses:
+        "200":
+          description: Customer email settings.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerEmailResponse"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: setCustomerEmail
+      summary: Update customer email settings
+      description: |
+        New in 1.9.0 on the bearer API. Requires a human principal (authorization
+        code flow) holding daykeeper.accounts:write (a workspace owner); other
+        principals receive
+        403. Accepts exactly `{ "enabled": boolean }` and returns the stored
+        setting.
+      tags: [Customer email]
+      security:
+        - daykeeperOAuth: [daykeeper.accounts:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerEmailInput"
+      responses:
+        "200":
+          description: Updated customer email settings.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerEmailResponse"
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
@@ -1788,9 +2289,15 @@ paths:
         per-principal request limits answer RATE_LIMITED with a Retry-After
         header. A client should treat either as retryable after the interval.
 
-        Daykeeper sends no email. The claim URL carries the token in its
-        fragment so it never reaches server logs or referrers; it is a secret,
-        it is shown once, and the agent delivers it out of band.
+        The claim URL carries the token in its fragment so it never reaches
+        server logs or referrers; it is a secret, it is shown once, and the
+        agent delivers it out of band. An installation may also be configured
+        to email the link to the claimed address when a new claim is created
+        (never on a replay); only such an installation adds the optional
+        `emailed` field, saying whether this response did. Servers before
+        1.8.0 and installations that do not email claims (the default) omit
+        it, so their results keep the 1.7 shape exactly; operators must
+        upgrade clients to 1.8.0 before turning claim emails on.
 
         When a request fails without a usable response its outcome is unknown.
         Repeat it with the same key and the exact original body to learn what
@@ -2043,8 +2550,23 @@ components:
       description: Opaque machine-owner bearer credential. The operation's required Daykeeper account scope is documented on each operation.
     daykeeperOAuth:
       type: oauth2
-      description: Short-lived, audience-bound Daykeeper OAuth access token.
+      description: |
+        Short-lived, audience-bound Daykeeper OAuth access token. Machine
+        clients use client credentials. A person signs in through the
+        authorization code flow with PKCE (S256); routes documented as
+        requiring a human principal accept only those tokens. The deployed
+        issuer, endpoints, and supported scopes are published in the issuer's
+        OAuth authorization server metadata.
       flows:
+        authorizationCode:
+          authorizationUrl: https://console.daykeeper.example/oauth/authorize
+          tokenUrl: https://console.daykeeper.example/oauth/token
+          scopes:
+            daykeeper.accounts:read: Read the person's profile, workspace, organizations and tenants.
+            daykeeper.accounts:write: Change workspace settings as a human owner.
+            daykeeper.billing:read: Read organization-wide usage and billing status.
+            daykeeper.conversations:read: Read tenant-scoped support conversations and messages.
+            daykeeper.conversations:write: Send tenant-scoped support replies and set conversation status.
         clientCredentials:
           tokenUrl: https://api.daykeeper.example/oauth/token
           scopes:
@@ -2062,7 +2584,7 @@ components:
             daykeeper.lifecycle:write: Mint tokens for tenant lifecycle messages.
             daykeeper.customers:delete: Mint target-bound customer erasure tokens.
             daykeeper.conversations:read: Read tenant-scoped support conversations and messages.
-            daykeeper.conversations:write: Send one tenant-scoped plain-text support reply.
+            daykeeper.conversations:write: Send tenant-scoped plain-text support replies and set conversation status.
   parameters:
     IdempotencyKey:
       name: Idempotency-Key
@@ -2117,6 +2639,33 @@ components:
       schema:
         type: string
         format: uuid
+    WebClientIfMatch:
+      name: If-Match
+      in: header
+      required: false
+      description: |
+        Replace only this version of the web client: the `version` (as sent in
+        `ETag`) from the last read or write. `3`, `"3"` and `W/"3"` are
+        accepted. A different stored version, or no web client at all, answers
+        VERSION_CONFLICT (412). A malformed value, including `*` or a list of
+        versions, answers INVALID_INPUT (400). Do not combine with
+        If-None-Match.
+      schema:
+        type: string
+        # Exactly the documented forms: bare, quoted, or weak and quoted.
+        pattern: '^(?:[1-9][0-9]{0,15}|"[1-9][0-9]{0,15}"|W/"[1-9][0-9]{0,15}")$'
+    WebClientIfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      description: |
+        `*` creates the web client only if the tenant has none. If one exists
+        the request answers VERSION_CONFLICT (412) and nothing changes. Any
+        other value answers INVALID_INPUT (400). Do not combine with If-Match.
+        New in contract 1.7.0; older servers ignore this header.
+      schema:
+        type: string
+        const: "*"
     DomainVerificationId:
       name: verificationId
       in: path
@@ -2142,6 +2691,12 @@ components:
       schema:
         type: string
         format: date-time
+    WebClientETag:
+      description: The web client's `version` as a quoted strong entity tag, for example `"3"`. Send it back as If-Match.
+      required: true
+      schema:
+        type: string
+        pattern: '^"[1-9][0-9]*"$'
   responses:
     IdempotencyKeyReused:
       description: |
@@ -2288,6 +2843,135 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
   schemas:
+    Profile:
+      type: object
+      additionalProperties: true
+      required: [userId, name, email, organizationId, workspace]
+      properties:
+        userId: { type: string, format: uuid }
+        name: { type: string, maxLength: 200 }
+        email: { type: string, format: email, maxLength: 254 }
+        organizationId: { type: string, format: uuid }
+        workspace:
+          type: object
+          additionalProperties: true
+          required: [organizationId, organizationSlug, name]
+          properties:
+            organizationId: { type: string, format: uuid }
+            organizationSlug: { type: string, maxLength: 120 }
+            name: { type: string, maxLength: 200 }
+    Workspace:
+      type: object
+      additionalProperties: true
+      required: [organizationId, organizationSlug, name]
+      properties:
+        organizationId: { type: string, format: uuid }
+        organizationSlug: { type: string, maxLength: 120 }
+        name: { type: string, maxLength: 200 }
+        role:
+          type: string
+          maxLength: 40
+          description: Optional. The person's role in the workspace when the server reports it, such as `owner` or `member`. Absent does not imply either role.
+    WorkspaceList:
+      type: object
+      additionalProperties: true
+      required: [items]
+      description: Workspaces the person can reach through this connection. The workspace bound to the access token is always the active one.
+      properties:
+        items:
+          type: array
+          maxItems: 1000
+          items: { $ref: "#/components/schemas/Workspace" }
+    CustomerEmail:
+      type: object
+      additionalProperties: true
+      required:
+        [
+          tenantId,
+          enabled,
+          customSender,
+          senderName,
+          sendingDomain,
+          deliveryEnabled,
+        ]
+      properties:
+        tenantId: { type: string, format: uuid }
+        enabled: { type: boolean }
+        customSender:
+          type: boolean
+          description: True when the workspace sends from its own verified domain; the switch then has no effect.
+        senderName:
+          type: string
+          maxLength: 200
+          description: The name customers see in the From line.
+        sendingDomain:
+          type: [string, "null"]
+          maxLength: 253
+          description: Where shared tenant email is sent from on this installation. Null when the installation does not send it yet; the switch is still saved.
+        deliveryEnabled:
+          type: boolean
+          description: Whether this installation sends shared tenant email at all.
+    CustomerEmailInput:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+    OperatorConversationPage:
+      type: object
+      additionalProperties: true
+      description: New in 1.9.0. Pass `nextCursor` unchanged to read the next page; null means there is no next page.
+      required: [limit, nextCursor, hasMore]
+      properties:
+        limit: { type: integer, minimum: 1, maximum: 100 }
+        nextCursor: { type: [string, "null"], minLength: 1, maxLength: 256 }
+        hasMore: { type: boolean }
+    OperatorConversationMessagesPage:
+      type: object
+      additionalProperties: true
+      description: New in 1.9.0. Pass `nextCursor` unchanged to read the next page; null means there is no next page.
+      required: [limit, nextCursor, hasMore]
+      properties:
+        limit: { type: integer, minimum: 1, maximum: 100 }
+        nextCursor: { type: [string, "null"], minLength: 1, maxLength: 256 }
+        hasMore: { type: boolean }
+    OperatorConversationStatus:
+      type: string
+      enum: [open, resolved]
+    OperatorConversationStatusInput:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { $ref: "#/components/schemas/OperatorConversationStatus" }
+    OperatorConversationStatusResult:
+      type: object
+      additionalProperties: true
+      required: [tenantId, conversationId, conversation]
+      properties:
+        tenantId: { type: string, format: uuid }
+        conversationId:
+          {
+            type: integer,
+            format: int64,
+            minimum: 1,
+            maximum: 9007199254740991,
+          }
+        conversation: { $ref: "#/components/schemas/OperatorConversation" }
+    OperatorConversationDetail:
+      type: object
+      additionalProperties: true
+      required: [tenantId, conversationId, conversation]
+      properties:
+        tenantId: { type: string, format: uuid }
+        conversationId:
+          {
+            type: integer,
+            format: int64,
+            minimum: 1,
+            maximum: 9007199254740991,
+          }
+        conversation: { $ref: "#/components/schemas/OperatorConversation" }
     OperatorConversation:
       type: object
       additionalProperties: false
@@ -2337,7 +3021,7 @@ components:
         content: { type: string, minLength: 1, maxLength: 4000 }
     OperatorConversationList:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [tenantId, conversations]
       properties:
         tenantId: { type: string, format: uuid }
@@ -2345,9 +3029,12 @@ components:
           type: array
           maxItems: 100
           items: { $ref: "#/components/schemas/OperatorConversation" }
+        page:
+          description: Present only when the request sent `limit` or `cursor` (1.9.0 and later).
+          allOf: [{ $ref: "#/components/schemas/OperatorConversationPage" }]
     OperatorConversationMessages:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [tenantId, conversationId, messages]
       properties:
         tenantId: { type: string, format: uuid }
@@ -2362,6 +3049,10 @@ components:
           type: array
           maxItems: 200
           items: { $ref: "#/components/schemas/OperatorMessage" }
+        page:
+          description: Present only when the request sent `limit` or `cursor` (1.9.0 and later).
+          allOf:
+            [{ $ref: "#/components/schemas/OperatorConversationMessagesPage" }]
     OperatorConversationReply:
       type: object
       additionalProperties: false
@@ -2474,6 +3165,61 @@ components:
             absent, in which case the claim routes answer FEATURE_UNAVAILABLE
             (503). Absent means the server predates workspace claims. Enabled
             discovery does not grant machine-owner authority or account scopes.
+        webClients:
+          type: object
+          additionalProperties: true
+          description: |
+            Optional on older servers; absent means the server predates web
+            clients. `enabled: false` means the web-client routes answer
+            FEATURE_UNAVAILABLE (409). Open to fields added in later minor
+            versions.
+          required: [enabled, loopbackOrigins]
+          properties:
+            enabled:
+              type: boolean
+            loopbackOrigins:
+              type: boolean
+              description: True when `http://localhost`, `http://127.0.0.1` and `http://[::1]` origins are accepted, for local development.
+        operatorConversations:
+          type: object
+          additionalProperties: true
+          description: |
+            Optional. `enabled: false` means the operator conversation routes
+            are not available. Servers before 1.9.0 send at most `enabled`; an
+            absent sub-flag means that feature is not available. Open to
+            fields added in later minor versions.
+          required: [enabled]
+          properties:
+            enabled:
+              type: boolean
+            pagination:
+              type: boolean
+              description: True when conversation and message reads accept `limit` and `cursor` and return `page` for a request that sends either.
+            statusUpdates:
+              type: boolean
+              description: True when GET (read one conversation) and PATCH (set its status) on /v1/tenants/{tenantId}/conversations/{conversationId} are available. Absent or false means neither is.
+            idempotentReplies:
+              type: boolean
+              description: True when replies accept `Idempotency-Key`. When false, a reply carrying the header answers FEATURE_UNAVAILABLE (503).
+        customerEmail:
+          type: object
+          additionalProperties: true
+          description: Optional; absent on servers before 1.9.0. True when the customer email routes are available on the bearer API.
+          required: [enabled]
+          properties:
+            enabled:
+              type: boolean
+            deliveryEnabled:
+              type: boolean
+              description: Whether this installation sends shared tenant email at all.
+        dashboardIdentity:
+          type: object
+          additionalProperties: true
+          description: Optional; absent on servers before 1.9.0. True when GET /v1/profile and GET /v1/workspaces are available.
+          required: [enabled]
+          properties:
+            enabled:
+              type: boolean
         flows:
           type: object
           additionalProperties: false
@@ -4240,8 +4986,8 @@ components:
             characters that neither start nor end with a hyphen, separated by
             dots, and at least one dot is required. Uppercase is rejected rather
             than folded so the stored address matches the one that signs in.
-            Daykeeper sends no email; the caller delivers the returned claim URL
-            out of band.
+            The caller delivers the returned claim URL; an installation may also
+            email it to this address (see `emailed` on the result).
           examples:
             - gabriel@acme.com
             - gabriel+claims@mail.acme.co.uk
@@ -4273,6 +5019,18 @@ components:
         replayed:
           type: boolean
           const: false
+        emailed:
+          type: boolean
+          description: |
+            Whether this request emailed the claim URL to the claimed address.
+            Present only on an installation that emails claim links, and then
+            `false` when the send did not succeed (a failed send never fails
+            the claim). An installation that does not email claims, which is
+            the default, omits the field, so its responses keep the 1.7 shape
+            that this schema's `additionalProperties: false` accepted.
+            Operators must move clients to 1.8.0 before turning claim emails
+            on. The email carries the link and its expiry and no text the
+            agent chose.
     WorkspaceClaimReplayed:
       type: object
       additionalProperties: false
@@ -4293,6 +5051,14 @@ components:
         replayed:
           type: boolean
           const: true
+        emailed:
+          type: boolean
+          const: false
+          description: |
+            Present only on an installation that emails claim links, and then
+            always `false`: a replay sends no email, and whether the original
+            request emailed the link is not repeated. Omitted elsewhere, as on
+            the created result.
     WorkspaceClaimResult:
       description: |
         Either result of a create call, discriminated by `replayed`: a fresh
@@ -4422,6 +5188,163 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/RotateAgentCredentialResult"
+    WebClientResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/WebClient"
+    WebClient:
+      type: object
+      # Response envelope: open so older clients tolerate new fields.
+      additionalProperties: true
+      description: |
+        A tenant's web messenger settings: the websites allowed to open its
+        API inbox's web messenger, and the publishable key the messenger boots
+        with.
+      required:
+        [
+          tenantId,
+          state,
+          allowedOrigins,
+          publishableKey,
+          previousKeyExpiresAt,
+          greeting,
+          accentColor,
+          trafficEnabled,
+          snippet,
+          version,
+        ]
+      properties:
+        tenantId:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum: [enabled, disabled]
+        allowedOrigins:
+          type: array
+          minItems: 1
+          maxItems: 10
+          description: Exact, normalized origins, sorted.
+          items:
+            type: string
+        publishableKey:
+          type: string
+          pattern: "^dk_pk_[A-Za-z0-9]{32}$"
+          description: |
+            A public identifier, not a secret: it is embedded in the website's
+            HTML. What stops another website from using it is the Origin check
+            against `allowedOrigins`, made at the visitor-session exchange and at
+            the gateway.
+        previousKeyExpiresAt:
+          type: [string, "null"]
+          format: date-time
+          description: While a rotated-out key still works, when it stops. Null when there is none or it has expired.
+        greeting:
+          type: [string, "null"]
+          description: The messenger's opening line, or null for the default.
+        accentColor:
+          type: [string, "null"]
+          pattern: "^#[0-9a-f]{6}$"
+          description: Lowercase `#rrggbb`, or null for the default.
+        displayName:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 60
+          description: |
+            The name the messenger shows customers in its header, or null to
+            show the tenant's name. New in 1.10.0. Servers from 1.10.0 always
+            send it, null when unset; it is not required here only because
+            earlier servers omit it. Its presence is how a client knows the
+            server accepts `displayName` on PUT.
+        trafficEnabled:
+          type: boolean
+          description: True when `state` is enabled and the tenant's API inbox is live for customer traffic.
+        snippet:
+          type: string
+          description: |
+            The HTML install snippet: it loads
+            https://cdn.mydaykeeper.com/messenger/v1/messenger.js and boots the
+            messenger with `publishableKey`. Paste it into every page of an
+            allowed website.
+        version:
+          type: integer
+          minimum: 1
+          description: Increments on every change, including key rotation. Sent as `ETag`.
+    WebClientInput:
+      type: object
+      additionalProperties: false
+      description: |
+        The whole web messenger setting. An omitted `greeting` or `accentColor`
+        is cleared; an omitted `displayName` is kept (send `null` to clear it).
+      required: [state, allowedOrigins]
+      properties:
+        state:
+          type: string
+          enum: [enabled, disabled]
+          description: Disabled keeps the settings and key but turns the messenger off.
+        allowedOrigins:
+          type: array
+          minItems: 1
+          maxItems: 10
+          uniqueItems: true
+          description: |
+            One to ten distinct exact origins, `https://host[:port]`, with no
+            path, query, fragment, credentials or wildcard (a trailing `/` is
+            accepted and removed). `http://localhost`, `http://127.0.0.1` and
+            `http://[::1]` (any port) are accepted only where
+            `capabilities.webClients.loopbackOrigins` is true. Origins that
+            are equal after normalization are duplicates and rejected.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 2048
+            # An https origin (DNS name or bracketed IPv6, optional port), or
+            # a loopback http origin; at most one trailing slash.
+            pattern: '^(?:https://(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*|\[[0-9A-Fa-f:]+\])|http://(?:localhost|127\.0\.0\.1|\[::1\]))(?::[0-9]{1,5})?/?$'
+        greeting:
+          type: string
+          minLength: 1
+          maxLength: 280
+          description: |
+            1 to 280 characters after trimming, with no control characters.
+            Send it already trimmed. A greeting that is empty after trimming is
+            rejected; omit the field to clear it.
+        accentColor:
+          type: string
+          pattern: "^#[0-9a-fA-F]{6}$"
+          description: A `#rrggbb` hex color, stored lowercase.
+        displayName:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 60
+          # No leading or trailing whitespace and no control characters.
+          pattern: '^[^\s\x00-\x1f\x7f-\x9f](?:[^\x00-\x1f\x7f-\x9f]*[^\s\x00-\x1f\x7f-\x9f])?$'
+          description: |
+            The name customers see in the messenger's header, like "Warlord
+            Cards". A string sets it: 1 to 60 characters, already trimmed, with
+            no control characters. `null` clears it, so the messenger shows the
+            tenant's name. Unlike `greeting` and `accentColor`, an omitted
+            `displayName` is kept, so a writer built against an earlier
+            contract never clears a name it does not know about. Servers before
+            1.10.0 reject the field, so send it only when the GET response
+            carries `displayName`. Before the first PUT there is nothing to GET
+            (404); to create a web client with a name against a server of
+            unknown version, create it without `displayName`, then PUT again
+            with it once the response carries the field. Messengers show it as
+            plain text.
+    RotateWebClientPublishableKeyInput:
+      type: object
+      additionalProperties: false
+      required: [graceSeconds]
+      properties:
+        graceSeconds:
+          type: integer
+          minimum: 0
+          maximum: 604800
+          description: How long the previous key keeps working. 0 stops it at once; at most 604800 (seven days).
     WorkspaceClaimResponse:
       allOf:
         - $ref: "#/components/schemas/SuccessEnvelope"
@@ -4584,6 +5507,41 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/FlowVersion"
+    ProfileResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/Profile"
+    WorkspaceListResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/WorkspaceList"
+    CustomerEmailResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/CustomerEmail"
+    OperatorConversationStatusResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/OperatorConversationStatusResult"
+    OperatorConversationDetailResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/OperatorConversationDetail"
     OperatorConversationListResponse:
       allOf:
         - $ref: "#/components/schemas/SuccessEnvelope"
