@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Daykeeper Management API
-  version: 1.10.0
+  version: 1.12.0
   summary: Safe, multi-tenant support administration for people and agents.
   description: |
     Daykeeper owns tenant lifecycle, support-channel provisioning, durable
@@ -1004,6 +1004,7 @@ paths:
                       previousKeyExpiresAt: null
                       greeting: Hi! How can we help?
                       accentColor: "#336699"
+                      displayName: Example Shop
                       trafficEnabled: true
                       snippet: |-
                         <script>window.Daykeeper=window.Daykeeper||function(){(Daykeeper.q=Daykeeper.q||[]).push(arguments)};
@@ -1035,7 +1036,8 @@ paths:
         being deleted.
 
         The body replaces the whole setting: an omitted `greeting` or
-        `accentColor` is cleared, not kept. The first successful PUT for a
+        `accentColor` is cleared, not kept. `displayName` is the exception:
+        omitted, it is kept; `null` clears it. The first successful PUT for a
         tenant mints its publishable key and answers 201; later PUTs answer
         200 and keep the key (use the rotate operation to change it). A PUT
         that changes nothing leaves `version` as it was.
@@ -1082,6 +1084,7 @@ paths:
                     [https://www.example.test, https://example.test]
                   greeting: Hi! How can we help?
                   accentColor: "#336699"
+                  displayName: Example Shop
       responses:
         "200":
           description: The existing web client was replaced (or was already equal); its publishable key is unchanged.
@@ -1111,7 +1114,7 @@ paths:
                 $ref: "#/components/schemas/WebClientResponse"
         "400":
           $ref: "#/components/responses/Error"
-          description: The body, an origin, the greeting or the accent color is invalid, or the If-Match / If-None-Match headers are malformed or sent together (INVALID_INPUT).
+          description: The body, an origin, the greeting, the accent color or the display name is invalid, or the If-Match / If-None-Match headers are malformed or sent together (INVALID_INPUT).
         "401":
           $ref: "#/components/responses/Error"
         "403":
@@ -2270,7 +2273,7 @@ paths:
         constrained to true. Neither status ever carries the other's shape, so a
         client may narrow on the status code alone.
 
-        Since 1.10.0 the address is optional. A request without `email` issues
+        Since 1.12.0 the address is optional. A request without `email` issues
         an open claim: a single-use link that any signed-in person with a
         verified email who is not already a member may accept once, becoming an
         owner. Its `claim.email` is null while it is pending or revoked and the
@@ -2330,7 +2333,7 @@ paths:
                 value:
                   email: gabriel@acme.com
               open:
-                summary: Issue an open claim link that names nobody (1.10.0)
+                summary: Issue an open claim link that names nobody (1.12.0)
                 value: {}
       responses:
         "200":
@@ -2422,9 +2425,9 @@ paths:
         organization comes only from the verified machine owner; no
         organization or pagination selector is accepted.
 
-        Open claims nobody has accepted yet (1.10.0) have no address. They
+        Open claims nobody has accepted yet (1.12.0) have no address. They
         are listed only when the request asks with `include=open`, so a client
-        generated before 1.10.0, which expects every listed claim to carry an
+        generated before 1.12.0, which expects every listed claim to carry an
         address, never receives one. An accepted open claim carries the
         accepting address and is always listed.
 
@@ -2447,7 +2450,7 @@ paths:
           required: false
           description: |
             `open` also lists open claims nobody has accepted yet, whose
-            `email` is null (1.10.0). Any other value is rejected.
+            `email` is null (1.12.0). Any other value is rejected.
           schema:
             type: string
             enum: [open]
@@ -3867,6 +3870,40 @@ components:
           type: string
           enum: [stripe, apple_iap, android_iap, none]
           description: Omit when unknown. The explicit none value means the caller knows the customer has no payment provider.
+        platform:
+          type: string
+          enum: [ios, android, web]
+          description: Optional host-app platform for customer sessions only. Omit when unknown. The most recent known value observed by the gateway replaces this field; omitted fields retain their previous values across devices.
+        deviceBrand:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Device manufacturer reported by the host app; never a unique device identifier. Customer sessions only; omit when unknown. The most recent known value observed by the gateway replaces this field; omitted fields retain their previous values across devices.
+        deviceModel:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Device model reported by the host app; never a unique device identifier. Customer sessions only; omit when unknown. The most recent known value observed by the gateway replaces this field; omitted fields retain their previous values across devices.
+        osName:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Operating system name reported by the host app, such as iOS or Android. Customer sessions only; omit when unknown. The most recent known value observed by the gateway replaces this field; omitted fields retain their previous values across devices.
+        osVersion:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Operating system version reported by the host app. Customer sessions only; omit when unknown. The most recent known value observed by the gateway replaces this field; omitted fields retain their previous values across devices.
+        appVersion:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Host application version, not the Daykeeper SDK version. Customer sessions only; omit when unknown. The most recent known value observed by the gateway replaces this field; omitted fields retain their previous values across devices.
+        appBuild:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Host application build number or label, not the Daykeeper SDK build. Customer sessions only; omit when unknown. The most recent known value observed by the gateway replaces this field; omitted fields retain their previous values across devices.
         erasureTargetHash:
           type: string
           minLength: 43
@@ -4937,7 +4974,7 @@ components:
         An owner invitation issued by a machine owner. It reuses the existing
         invitation lifecycle: single use, email-match on acceptance, and a
         bounded expiry. Accepting it never demotes the machine owner. An open
-        claim (1.10.0) has no address to match; see `email`.
+        claim (1.12.0) has no address to match; see `email`.
       required:
         [
           id,
@@ -4964,12 +5001,12 @@ components:
           maxLength: 254
           description: |
             Lowercased address that must sign in to accept this claim. For an
-            open claim (created without an address, 1.10.0) it is null while
+            open claim (created without an address, 1.12.0) it is null while
             the claim is pending or revoked, and the verified address that
-            accepted it once accepted. Null is only ever returned to a 1.10.0
+            accepted it once accepted. Null is only ever returned to a 1.12.0
             client: in the create result for an open claim, in a revoke of one
             (whose id only that client holds), and in a list requested with
-            `include=open`. A client generated before 1.10.0 never receives
+            `include=open`. A client generated before 1.12.0 never receives
             it.
         role:
           type: string
@@ -5009,7 +5046,7 @@ components:
       additionalProperties: false
       description: |
         With `email`, a claim only that address can accept. Without it
-        (1.10.0), an open claim: a single-use link any signed-in person with a
+        (1.12.0), an open claim: a single-use link any signed-in person with a
         verified email may accept once.
       properties:
         email:
@@ -5288,6 +5325,16 @@ components:
           type: [string, "null"]
           pattern: "^#[0-9a-f]{6}$"
           description: Lowercase `#rrggbb`, or null for the default.
+        displayName:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 60
+          description: |
+            The name the messenger shows customers in its header, or null to
+            show the tenant's name. New in 1.10.0. Servers from 1.10.0 always
+            send it, null when unset; it is not required here only because
+            earlier servers omit it. Its presence is how a client knows the
+            server accepts `displayName` on PUT.
         trafficEnabled:
           type: boolean
           description: True when `state` is enabled and the tenant's API inbox is live for customer traffic.
@@ -5305,7 +5352,9 @@ components:
     WebClientInput:
       type: object
       additionalProperties: false
-      description: The whole web messenger setting. Omitted optional fields are cleared.
+      description: |
+        The whole web messenger setting. An omitted `greeting` or `accentColor`
+        is cleared; an omitted `displayName` is kept (send `null` to clear it).
       required: [state, allowedOrigins]
       properties:
         state:
@@ -5343,6 +5392,25 @@ components:
           type: string
           pattern: "^#[0-9a-fA-F]{6}$"
           description: A `#rrggbb` hex color, stored lowercase.
+        displayName:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 60
+          # No leading or trailing whitespace and no control characters.
+          pattern: '^[^\s\x00-\x1f\x7f-\x9f](?:[^\x00-\x1f\x7f-\x9f]*[^\s\x00-\x1f\x7f-\x9f])?$'
+          description: |
+            The name customers see in the messenger's header, like "Warlord
+            Cards". A string sets it: 1 to 60 characters, already trimmed, with
+            no control characters. `null` clears it, so the messenger shows the
+            tenant's name. Unlike `greeting` and `accentColor`, an omitted
+            `displayName` is kept, so a writer built against an earlier
+            contract never clears a name it does not know about. Servers before
+            1.10.0 reject the field, so send it only when the GET response
+            carries `displayName`. Before the first PUT there is nothing to GET
+            (404); to create a web client with a name against a server of
+            unknown version, create it without `displayName`, then PUT again
+            with it once the response carries the field. Messengers show it as
+            plain text.
     RotateWebClientPublishableKeyInput:
       type: object
       additionalProperties: false

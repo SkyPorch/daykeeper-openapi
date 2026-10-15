@@ -112,7 +112,7 @@ test("workspace claims are machine-owner scoped, idempotent, and non-cacheable",
   assert.deepEqual(collection.post.parameters, [
     { $ref: "#/components/parameters/IdempotencyKey" },
   ]);
-  // 1.10.0: the list's only parameter is the opt-in for open claims.
+  // 1.12.0: the list's only parameter is the opt-in for open claims.
   assert.deepEqual(
     collection.get.parameters.map((parameter) => parameter.name),
     ["include"],
@@ -227,7 +227,7 @@ test("claim schemas are strict, owner-only, and reveal the token exactly once", 
     assert.deepEqual(property.type, ["string", "null"]);
     assert.equal(property.format, "date-time");
   }
-  // 1.10.0: the address is optional (an open claim), and a claim reports a
+  // 1.12.0: the address is optional (an open claim), and a claim reports a
   // null address while it is open.
   assert.equal(schemas.CreateWorkspaceClaimInput.required, undefined);
   assert.deepEqual(schemas.WorkspaceClaim.properties.email.type, [
@@ -301,7 +301,7 @@ test("the claim list is unbounded and documents its own ordering", () => {
   assert.match(items.description, /hourly/);
   const list = contract.paths["/v1/workspace-claims"].get;
   assert.match(list.description, /no pagination in\s+v1/);
-  // 1.10.0: the only selector is the opt-in for open claims.
+  // 1.12.0: the only selector is the opt-in for open claims.
   assert.deepEqual(
     list.parameters.map((parameter) => [
       parameter.name,
