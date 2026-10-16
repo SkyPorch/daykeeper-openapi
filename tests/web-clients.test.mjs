@@ -69,9 +69,10 @@ after(() => {
   if (directory) rmSync(directory, { recursive: true, force: true });
 });
 
-test("the contract version is 1.11.0", () => {
-  // 1.11.0 adds optional host-app contact technical context.
-  assert.equal(contract.info.version, "1.11.0");
+test("the contract version is 1.12.0", () => {
+  // 1.11.0 adds optional host-app contact technical context; 1.12.0 makes
+  // the workspace claim address optional (open claims).
+  assert.equal(contract.info.version, "1.12.0");
 });
 
 test("web-client operations exist with the right scopes and tag", () => {

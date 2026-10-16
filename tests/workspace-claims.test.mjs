@@ -112,7 +112,11 @@ test("workspace claims are machine-owner scoped, idempotent, and non-cacheable",
   assert.deepEqual(collection.post.parameters, [
     { $ref: "#/components/parameters/IdempotencyKey" },
   ]);
-  assert.equal(collection.get.parameters, undefined);
+  // 1.12.0: the list's only parameter is the opt-in for open claims.
+  assert.deepEqual(
+    collection.get.parameters.map((parameter) => parameter.name),
+    ["include"],
+  );
   assert.deepEqual(revoke.parameters, [
     { $ref: "#/components/parameters/WorkspaceClaimId" },
   ]);
@@ -223,7 +227,13 @@ test("claim schemas are strict, owner-only, and reveal the token exactly once", 
     assert.deepEqual(property.type, ["string", "null"]);
     assert.equal(property.format, "date-time");
   }
-  assert.deepEqual(schemas.CreateWorkspaceClaimInput.required, ["email"]);
+  // 1.12.0: the address is optional (an open claim), and a claim reports a
+  // null address while it is open.
+  assert.equal(schemas.CreateWorkspaceClaimInput.required, undefined);
+  assert.deepEqual(schemas.WorkspaceClaim.properties.email.type, [
+    "string",
+    "null",
+  ]);
   assert.equal(
     schemas.CreateWorkspaceClaimInput.properties.email.maxLength,
     254,
@@ -291,7 +301,17 @@ test("the claim list is unbounded and documents its own ordering", () => {
   assert.match(items.description, /hourly/);
   const list = contract.paths["/v1/workspace-claims"].get;
   assert.match(list.description, /no pagination in\s+v1/);
-  assert.equal(list.parameters, undefined);
+  // 1.12.0: the only selector is the opt-in for open claims.
+  assert.deepEqual(
+    list.parameters.map((parameter) => [
+      parameter.name,
+      parameter.in,
+      parameter.required,
+      parameter.schema.enum,
+    ]),
+    [["include", "query", false, ["open"]]],
+  );
+  assert.match(list.description, /include=open/);
 });
 
 test("the email pattern accepts real addresses and rejects malformed ones", () => {
@@ -499,5 +519,54 @@ test("the OpenAPI validator accepts results with and without emailed, and reject
   assert.deepEqual([...invalidExampleNames(refused)].sort(), [
     "emailedReplay",
     "stringEmailed",
+  ]);
+});
+
+test("the OpenAPI validator accepts open claims and still refuses a null or extra input", () => {
+  const OPEN = { ...CLAIM, email: null };
+  const valid = structuredClone(contract);
+  valid.paths["/v1/workspace-claims"].post.requestBody.content[
+    "application/json"
+  ].examples = {
+    open: { value: {} },
+    addressed: { value: { email: "a@b.co" } },
+  };
+  mediaType(valid, "201").examples = {
+    open: { value: { data: { ...FRESH, claim: OPEN, emailed: false } } },
+  };
+  mediaType(valid, "200").examples = {
+    acceptedOpen: {
+      value: {
+        data: {
+          ...REPLAY,
+          claim: {
+            ...CLAIM,
+            state: "accepted",
+            acceptedAt: "2026-09-11T01:00:00Z",
+          },
+        },
+      },
+    },
+  };
+  valid.paths["/v1/workspace-claims"].get.responses["200"].content[
+    "application/json"
+  ].examples = { mixed: { value: { data: { items: [OPEN, CLAIM] } } } };
+  const accepted = lintDocument(valid, "claim-open-examples");
+  assert.equal(accepted.status, 0, `${accepted.stdout}\n${accepted.stderr}`);
+
+  const invalid = structuredClone(contract);
+  invalid.paths["/v1/workspace-claims"].post.requestBody.content[
+    "application/json"
+  ].examples = {
+    nullAddress: { value: { email: null } },
+    emptyAddress: { value: { email: "" } },
+    extra: { value: { open: true } },
+  };
+  const refused = lintDocument(invalid, "claim-open-invalid");
+  assert.notEqual(refused.status, 0);
+  assert.deepEqual([...invalidExampleNames(refused)].sort(), [
+    "emptyAddress",
+    "extra",
+    "nullAddress",
   ]);
 });
