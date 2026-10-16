@@ -69,10 +69,11 @@ after(() => {
   if (directory) rmSync(directory, { recursive: true, force: true });
 });
 
-test("the contract version is 1.12.0", () => {
+test("the contract version is 1.13.0", () => {
   // 1.11.0 adds optional host-app contact technical context; 1.12.0 makes
-  // the workspace claim address optional (open claims).
-  assert.equal(contract.info.version, "1.12.0");
+  // the workspace claim address optional (open claims); 1.13.0 adds the
+  // web client's logo.
+  assert.equal(contract.info.version, "1.13.0");
 });
 
 test("web-client operations exist with the right scopes and tag", () => {
@@ -132,6 +133,9 @@ test("the first PUT creates (201), later PUTs replace (200)", () => {
     put.description,
     /`displayName` is the exception:\s+omitted, it is kept; `null` clears it/,
   );
+  // So is an omitted logo (1.13.0).
+  assert.match(put.description, /`logo` \(1\.13\.0\) is kept the\s+same way/);
+  assert.match(put.responses["400"].description, /the logo is invalid/);
   assert.match(
     put.description,
     /Without a precondition the PUT is unconditional/,
@@ -207,7 +211,7 @@ test("request bodies are closed, the WebClient response is open", () => {
   assert.ok(!input.required.includes("displayName"));
   assert.match(name.description, /an omitted\s+`displayName` is kept/);
   // The schema-level summary states the same exception.
-  assert.match(input.description, /an omitted `displayName` is kept/);
+  assert.match(input.description, /an omitted `displayName` or `logo` is kept/);
   // And there is a compatible way to create one with a name.
   assert.match(
     name.description,
@@ -229,6 +233,46 @@ test("request bodies are closed, the WebClient response is open", () => {
   assert.deepEqual(output.type, ["string", "null"]);
   assert.equal(output.maxLength, 60);
   assert.ok(!schemas.WebClient.required.includes("displayName"));
+  // logo: optional data: URI in, optional https URL out; null clears,
+  // omitted keeps, and the cap is 64 KiB decoded.
+  const logo = input.properties.logo;
+  assert.deepEqual(logo.type, ["string", "null"]);
+  assert.ok(!input.required.includes("logo"));
+  assert.match(logo.description, /at most 65536\s+bytes once decoded/);
+  assert.match(logo.description, /an omitted `logo` is kept/);
+  assert.match(
+    logo.description,
+    /create it without `logo`, then PUT\s+again with it once the response carries `logoUrl`/,
+  );
+  // The longest prefix plus 65536 bytes of base64 fits exactly.
+  assert.equal(
+    logo.maxLength,
+    "data:image/svg+xml;base64,".length + Math.ceil(65536 / 3) * 4,
+  );
+  const logoPattern = new RegExp(logo.pattern);
+  for (const value of [
+    "data:image/png;base64,iVBORw0KGgo=",
+    "data:image/svg+xml;base64,PHN2Zy8+",
+    "data:image/jpeg;base64,/9j/4A==",
+    "data:image/gif;base64,R0lGODlh",
+    "data:image/webp;base64,UklGRg==",
+  ])
+    assert.match(value, logoPattern);
+  for (const value of [
+    "https://example.test/logo.png",
+    "data:text/html;base64,PGgxPg==",
+    "data:image/png,rawbytes",
+    "data:image/png;base64,",
+    "data:image/png;base64,iVBO Rw0K",
+    "data:image/x-icon;base64,AAABAA==",
+  ])
+    assert.doesNotMatch(value, logoPattern);
+  const logoUrl = schemas.WebClient.properties.logoUrl;
+  assert.deepEqual(logoUrl.type, ["string", "null"]);
+  assert.equal(logoUrl.pattern, "^https://");
+  assert.ok(!schemas.WebClient.required.includes("logoUrl"));
+  assert.match(logoUrl.description, /a URL never changes what it serves/);
+  assert.match(logoUrl.description, /accepts `logo` on PUT/);
   const rotate = schemas.RotateWebClientPublishableKeyInput;
   assert.equal(rotate.additionalProperties, false);
   assert.deepEqual(rotate.required, ["graceSeconds"]);
@@ -257,10 +301,33 @@ test("the OpenAPI validator accepts real web clients and rejects bad input", () 
   put.responses["201"].content["application/json"].examples = {
     created: { value: { data: BODY } },
     newerServer: { value: { data: { ...BODY, laterField: 1 } } },
+    withLogo: {
+      value: {
+        data: {
+          ...BODY,
+          displayName: null,
+          logoUrl: `https://cdn.mydaykeeper.com/web-client-logos/${"a".repeat(64)}`,
+        },
+      },
+    },
   };
   put.requestBody.content["application/json"].examples = {
     minimal: {
       value: { state: "disabled", allowedOrigins: ["https://example.test"] },
+    },
+    withLogo: {
+      value: {
+        state: "enabled",
+        allowedOrigins: ["https://example.test"],
+        logo: "data:image/png;base64,iVBORw0KGgo=",
+      },
+    },
+    removeLogo: {
+      value: {
+        state: "enabled",
+        allowedOrigins: ["https://example.test"],
+        logo: null,
+      },
     },
   };
   const valid = lintDocument(document, "web-client-valid");
@@ -277,6 +344,16 @@ test("the OpenAPI validator accepts real web clients and rejects bad input", () 
       state: "enabled",
       allowedOrigins: ["https://example.test"],
       accentColor: "red",
+    },
+    logoAsUrl: {
+      state: "enabled",
+      allowedOrigins: ["https://example.test"],
+      logo: "https://example.test/logo.png",
+    },
+    logoNotAnImage: {
+      state: "enabled",
+      allowedOrigins: ["https://example.test"],
+      logo: "data:text/html;base64,PGgxPg==",
     },
   })) {
     const invalid = structuredClone(document);
