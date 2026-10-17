@@ -265,8 +265,29 @@ test("request bodies are closed, the WebClient response is open", () => {
     "data:image/png;base64,",
     "data:image/png;base64,iVBO Rw0K",
     "data:image/x-icon;base64,AAABAA==",
+    // Not whole base64 quartets.
+    "data:image/png;base64,A",
+    "data:image/png;base64,A=",
+    "data:image/png;base64,AB=",
+    "data:image/png;base64,ABCDE",
+    "data:image/png;base64,AB==CD==",
   ])
     assert.doesNotMatch(value, logoPattern);
+  // The 65536-byte cap holds on the decoded image, whatever the prefix.
+  const b64 = (bytes) => Buffer.alloc(bytes).toString("base64");
+  for (const type of ["png", "svg+xml"]) {
+    for (const bytes of [65_534, 65_535, 65_536])
+      assert.match(`data:image/${type};base64,${b64(bytes)}`, logoPattern);
+    for (const bytes of [65_537, 65_538, 65_541])
+      assert.doesNotMatch(
+        `data:image/${type};base64,${b64(bytes)}`,
+        logoPattern,
+      );
+  }
+  // The schema's length bound is no tighter than the pattern.
+  assert.ok(
+    `data:image/svg+xml;base64,${b64(65_536)}`.length <= logo.maxLength,
+  );
   const logoUrl = schemas.WebClient.properties.logoUrl;
   assert.deepEqual(logoUrl.type, ["string", "null"]);
   assert.equal(logoUrl.pattern, "^https://");
