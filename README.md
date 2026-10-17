@@ -301,6 +301,25 @@ claim. One optional response field is a minor bump under
 [`VERSIONING.md`](VERSIONING.md), so `info.version` moves from `1.7.0` to
 `1.8.0`.
 
+## Unreleased web messenger logo
+
+Contract `1.13.0` adds an optional company logo to the web-client resource.
+The messenger shows it in its header, thread intro and conversation rows in
+place of the name's initial. On `PUT`, `logo` is a base64 `data:` URI of a
+PNG, JPEG, GIF, WebP or SVG image, at most 65536 bytes once decoded and really
+of the type it names; `null` removes it. Like `displayName`, an omitted `logo`
+is **kept**, so writers built against `1.12.0` and earlier never remove a logo
+they cannot see, and saves that change something else do not resend the
+image. Responses carry `logoUrl`, null when unset: an absolute `https` URL on
+the deployment's public asset host, addressed by the image's content, so a
+URL never changes what it serves and can be cached indefinitely. Servers from
+`1.13.0` always return `logoUrl`; earlier servers omit it and reject `logo` on
+`PUT`, so send a logo only to a server whose GET carried `logoUrl`, and create
+a new web client without one, then `PUT` again. One optional request and
+response field, with existing requests meaning what they meant, is a minor
+bump under [`VERSIONING.md`](VERSIONING.md), so `info.version` moves from
+`1.12.0` to `1.13.0`.
+
 ## Unreleased web messenger display name
 
 Contract `1.10.0` adds an optional `displayName` to the web-client resource:

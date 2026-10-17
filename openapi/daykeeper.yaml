@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Daykeeper Management API
-  version: 1.12.0
+  version: 1.13.0
   summary: Safe, multi-tenant support administration for people and agents.
   description: |
     Daykeeper owns tenant lifecycle, support-channel provisioning, durable
@@ -1005,6 +1005,7 @@ paths:
                       greeting: Hi! How can we help?
                       accentColor: "#336699"
                       displayName: Example Shop
+                      logoUrl: https://cdn.mydaykeeper.com/web-client-logos/9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
                       trafficEnabled: true
                       snippet: |-
                         <script>window.Daykeeper=window.Daykeeper||function(){(Daykeeper.q=Daykeeper.q||[]).push(arguments)};
@@ -1037,7 +1038,8 @@ paths:
 
         The body replaces the whole setting: an omitted `greeting` or
         `accentColor` is cleared, not kept. `displayName` is the exception:
-        omitted, it is kept; `null` clears it. The first successful PUT for a
+        omitted, it is kept; `null` clears it. `logo` (1.13.0) is kept the
+        same way. The first successful PUT for a
         tenant mints its publishable key and answers 201; later PUTs answer
         200 and keep the key (use the rotate operation to change it). A PUT
         that changes nothing leaves `version` as it was.
@@ -1114,7 +1116,7 @@ paths:
                 $ref: "#/components/schemas/WebClientResponse"
         "400":
           $ref: "#/components/responses/Error"
-          description: The body, an origin, the greeting, the accent color or the display name is invalid, or the If-Match / If-None-Match headers are malformed or sent together (INVALID_INPUT).
+          description: The body, an origin, the greeting, the accent color, the display name or the logo is invalid, or the If-Match / If-None-Match headers are malformed or sent together (INVALID_INPUT).
         "401":
           $ref: "#/components/responses/Error"
         "403":
@@ -5335,6 +5337,22 @@ components:
             send it, null when unset; it is not required here only because
             earlier servers omit it. Its presence is how a client knows the
             server accepts `displayName` on PUT.
+        logoUrl:
+          type: [string, "null"]
+          format: uri
+          maxLength: 2048
+          pattern: "^https://"
+          description: |
+            Where the logo set with `logo` is served, or null when there is
+            none. The messenger shows it in its header in place of the name's
+            initial. An absolute `https` URL on the deployment's public asset
+            host, readable without credentials from any website. It is
+            addressed by the image's content: a different logo gets a
+            different URL and a URL never changes what it serves, so it may be
+            cached for as long as a client likes. New in 1.13.0. Servers from
+            1.13.0 always send it, null when unset; it is not required here
+            only because earlier servers omit it. Its presence is how a client
+            knows the server accepts `logo` on PUT.
         trafficEnabled:
           type: boolean
           description: True when `state` is enabled and the tenant's API inbox is live for customer traffic.
@@ -5354,7 +5372,8 @@ components:
       additionalProperties: false
       description: |
         The whole web messenger setting. An omitted `greeting` or `accentColor`
-        is cleared; an omitted `displayName` is kept (send `null` to clear it).
+        is cleared; an omitted `displayName` or `logo` is kept (send `null` to
+        clear it).
       required: [state, allowedOrigins]
       properties:
         state:
@@ -5411,6 +5430,31 @@ components:
             unknown version, create it without `displayName`, then PUT again
             with it once the response carries the field. Messengers show it as
             plain text.
+        logo:
+          type: [string, "null"]
+          maxLength: 87410
+          # Whole base64 quartets only, at most 65536 bytes decoded whatever
+          # the prefix: up to 21845 quartets (the last may be padded), or
+          # 21845 full quartets plus one padded to a single byte.
+          pattern: '^data:image/(?:png|jpeg|gif|webp|svg\+xml);base64,(?:(?:[A-Za-z0-9+/]{4}){0,21844}(?:[A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)|(?:[A-Za-z0-9+/]{4}){21845}[A-Za-z0-9+/]{2}==)$'
+          description: |
+            The company logo the messenger shows in its header, as a base64
+            `data:` URI of a PNG, JPEG, GIF, WebP or SVG image: at most 65536
+            bytes once decoded, and really of the type it names (a PNG must
+            start with the PNG signature, an SVG must be an `<svg>` document).
+            A square image of at least 96 pixels looks best: the messenger
+            fits it inside a circle. A string sets it and
+            the response's `logoUrl` says where it is served. `null` removes
+            it, so the messenger shows the name's initial again. Like
+            `displayName`, an omitted `logo` is kept, so a writer that does
+            not know about logos never removes one, and a save that changes
+            something else need not send the image again. Servers before
+            1.13.0 reject the field, so send it only when the GET response
+            carries `logoUrl`; to create a web client with a logo against a
+            server of unknown version, create it without `logo`, then PUT
+            again with it once the response carries `logoUrl`. Servers serve
+            SVG logos with a sandboxing Content-Security-Policy, and
+            messengers only ever draw them as an image.
     RotateWebClientPublishableKeyInput:
       type: object
       additionalProperties: false
